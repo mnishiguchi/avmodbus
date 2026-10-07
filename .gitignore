@@ -1,0 +1,13 @@
+**/_build/
+**/cover/
+**/deps/
+**/doc/
+**/.fetch
+**/erl_crash.dump
+**/tmp/
+**/*.avm
+**/.atomvm/
+**/atomvm/
+**/firmware_images/
+**/__pycache__/
+**/*.pyc
