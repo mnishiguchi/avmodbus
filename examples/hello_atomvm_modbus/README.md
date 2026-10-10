@@ -229,6 +229,9 @@ mix atomvm.esp32.monitor --port /dev/ttyACM0
 ```
 
 この telemetry は観測機能であり、それ自体を external Modbus peer との interoperability 成功とは扱いません。
+実 RS485 traffic を使った計測条件と結果は
+[`../../docs/MEMORY_FOOTPRINT.md`](../../docs/MEMORY_FOOTPRINT.md#2026-10-10-real-rs485-baseline)
+に記録しています。
 
 ## Device resource recovery probe
 

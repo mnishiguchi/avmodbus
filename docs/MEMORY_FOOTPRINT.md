@@ -36,7 +36,7 @@ free heap delta は managed process heap だけでなく、role module の load�
 
 ## 2026-10-09 baseline
 
-共通条件は RTU、9,600 baud、UART1、GPIO11 TX、GPIO12 RX、response 待機中または idle server です。
+共通条件は RTU、9,600 baud、UART1、GPIO23 TX、GPIO24 RX、response 待機中または idle server です。
 
 | Role | Free heap before | Free heap after | Role delta | Process count | Managed process memory |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -64,3 +64,17 @@ free / minimum free heap、binary memory、process count、managed process memor
 
 health monitor は自身だけを GC し、managed Modbus process の heap には介入しません。したがって、
 process memory や mailbox の継続的な増加を soak run 中に観測できます。
+
+## 2026-10-10 real RS485 baseline
+
+2 台の XIAO ESP32-C5 と 2 台の HW-519 を RS485 で接続し、RTU、9,600 baud、8N1、unit ID 1、
+function `0x03`、client polling interval 100 ms、health interval 10 秒で実行しました。client を 5 分、
+server を 5 分 30 秒観測し、client は 1,623 request 成功、failure 0 でした。
+
+| Role | Health snapshots | Status | Steady free heap | Largest free block | Minimum free | Process count | Managed process memory | Mailbox |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | --- | ---: |
+| RTU client | 29 | connected | 145,632–146,080 B | 131,072 B | 143,652 B | 6–7 | client: 720 B | 0 |
+| RTU server | 32 | connected | 136,684–137,424 B | 114,688–122,880 B | 133,140 B | 7 | memory: 672 B; server: 1,436 B | 0 |
+
+client の binary memory は 0 B、server は 35 B で安定しました。この 5 分 baseline は telemetry と
+real RS485 traffic の短時間安定性確認であり、roadmap の長時間 soak 完了とは扱いません。

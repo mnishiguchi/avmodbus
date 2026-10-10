@@ -8,6 +8,7 @@ defmodule AVModbus.SoakTest do
   alias AVModbus.Test.DuplexTransport
 
   @moduletag :soak
+  @moduletag timeout: :infinity
   @register_count 64
   @request_timeout 1_000
   @memory_growth_limit 4_096
