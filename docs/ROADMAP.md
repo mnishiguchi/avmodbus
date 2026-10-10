@@ -35,7 +35,9 @@ AtomVM が提供する機能の範囲で、完全な protocol coverage、client 
 - custom function と generic MEI を `pymodbus` の registered PDU と TCP / RTU / ASCII で双方向確認済み
 - pinned production example に AVM artifact size の 126,200-byte regression budget を設定済み
 - XIAO ESP32-C5 上で RTU client / server の free-heap delta と managed process memory baseline を計測済み
-- RTU / ASCII / TCP client / server の configurable host soak harness と 20 秒の combined baseline を整備済み
+- RTU / ASCII / TCP client / server の configurable host soak harness と 10 分の combined baseline を整備済み
+  - 1 ms interval で RTU 299,222、ASCII 299,208、TCP 298,507 iteration、process count 126 → 126、
+    managed process memory growth は 4,096-byte bound 内
 - XIAO ESP32-C5 の長時間検証向けに connection state / heap / process / mailbox の periodic telemetry を整備済み
 - TCP client の未送信 queue を bounded にし、saturation error と capacity recovery を検証済み
 - client-wide default timeout を XIAO ESP32-C5 の RTU client で起動・連続 timeout 確認済み

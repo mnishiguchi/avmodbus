@@ -44,6 +44,7 @@
 | 2026-10-09 | UART hardware configuration boundary を確定し、初期比較用 parity guide を役目完了として削除 |
 | 2026-10-09 | zero-timeout serial probe の clock-tick race を修正し、即時 attempt contract を固定 |
 | 2026-10-09 | XIAO ESP32-C5 用の bounded TCP resource recovery probe を追加し、AtomVM 非対応の `Map.pop/2` を TCP runtime path から除去 |
+| 2026-10-10 | soak harness の ExUnit 60 秒 timeout を除去し、RTU / ASCII / TCP combined 10 分 baseline を確認 |
 
 ## 現在の検証状況
 
@@ -76,8 +77,9 @@
 - opt-in memory probe 追加後の default production `sample_app.avm` は 123,316 bytes、
   SHA-256 は `f5b17404de6add700e7cb915b1fd025cb41557c9f4c162b61a008a202e07a71c`、
   126,000-byte budget 内
-- host soak harness の combined 20 秒実行で RTU 3,329、ASCII 3,328、TCP 3,322 iteration が成功。
-  process count は 126 のまま、各 managed process の memory growth は設定した 4,096-byte bound 内
+- host soak harness の combined 10 分実行（1 ms interval）で RTU 299,222、ASCII 299,208、
+  TCP 298,507 iteration が成功。process count は 126 のまま、最大 memory growth は RTU server の
+  1,872 bytes で、設定した 4,096-byte bound 内
 - XIAO ESP32-C5 の RTU server で 1 秒間隔の health telemetry を 10 回連続取得。warm-up 後は
   free heap 148,032 bytes、process count 7、memory process 576 bytes、server process 940 bytes、
   両 mailbox length 0 で安定し、全 snapshot で `status=:connected`

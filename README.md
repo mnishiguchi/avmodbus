@@ -247,6 +247,8 @@ RTU / ASCII / TCP の managed client / server を継続運転する soak test �
 `SOAK_SECONDS` で実行時間、`SOAK_TRANSPORT` で `all` / `rtu` / `ascii` / `tcp`、
 `SOAK_INTERVAL_MS` で transaction 間隔（default: 5 ms）を指定できます。各 iteration は
 write と read-back の result を照合し、終了時に process count、process memory、liveness を検証します。
+soak module は ExUnit の既定 60 秒 timeout を使用せず、`SOAK_SECONDS` と各 request deadline で
+実行時間を制御します。
 
 ```sh
 SOAK_SECONDS=600 mix test --include soak test/avmodbus/soak_test.exs
