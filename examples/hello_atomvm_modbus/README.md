@@ -33,6 +33,10 @@ D5 / GPIO24 RX   <---  RXD
 `TXD` / `RXD` 表示は MCU 側 UART と同名で接続します。transceiver によって pin 名の基準が
 異なるため、別製品では回路図または datasheet を確認してください。
 
+各 HW-519 は接続先 XIAO の `3V3` から個別に給電します。2 台の XIAO 間では `GND`、`A`、`B` のみを
+接続し、別々の regulator 出力である `3V3` 同士は接続しません。短い bench 配線での検証時は
+termination resistor を使用していません。
+
 ### UART1 を使用する理由
 
 XIAO ESP32-C5 の公式 pinout では D6 / GPIO11 が TX、D7 / GPIO12 が RX と表示されています。
@@ -80,6 +84,38 @@ MODBUS_ROLE=server mix atomvm.esp32.monitor --port /dev/ttyACM0
 ```
 
 server mode では `AVModbus.Memory` を data model とする in-memory server を起動します。
+
+## RS485 baud-rate 実機検証
+
+2 台の XIAO ESP32-C5 と 2 台の HW-519 を使い、8N1、unit ID 1、function `0x03`、holding register
+address 0 / quantity 1、5 秒間隔の条件で次の baud rate を確認しています。client console で
+少なくとも 3 回連続して `modbus: registers [0]` を受信することを合格条件としました。
+
+| Baud rate | 結果 |
+| ---: | --- |
+| 9,600 | pass |
+| 19,200 | pass |
+| 38,400 | pass |
+| 115,200 | pass |
+
+baud rate は compile-time configuration のため、server と client をそれぞれ clean build して flash します。
+次は 19,200 baud の例です。
+
+```sh
+mix clean
+MODBUS_ROLE=server ATOMVM_UART_SPEED=19200 \
+mix atomvm.esp32.flash --port /dev/ttyACM_SERVER
+
+mix clean
+ATOMVM_UART_SPEED=19200 \
+mix atomvm.esp32.flash --port /dev/ttyACM_CLIENT
+
+mix atomvm.esp32.monitor --port /dev/ttyACM_CLIENT
+```
+
+`/dev/ttyACM*` の番号は再接続時に変わることがあるため、flash 前に USB serial number で board の
+role を確認します。この検証は request / response の成立を確認するもので、echo、turnaround、frame gap の
+個別計測を完了したものではありません。
 
 ## Modbus ASCII
 
