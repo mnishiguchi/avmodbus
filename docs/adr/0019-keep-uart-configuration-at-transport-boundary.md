@@ -34,3 +34,15 @@ configuration は不要な runtime validation と state を artifact に持ち�
 baud ごとの実機検証は firmware configuration を切り替えて build する。複数 UART や runtime-selected
 line coding を使う application は ownership と recovery を明示的に実装する必要がある。この制約が
 実運用で不十分と判明した場合は roadmap の再評価項目から新しい transport contract を設計する。
+
+## 実機検証後の再評価
+
+2 台の XIAO ESP32-C5 と HW-519 を使い、built-in transport の application configuration を切り替えて
+9,600 / 19,200 / 38,400 / 115,200 baud の RTU request / response を確認した。さらに 9,600 baud の
+polling 中に RS485 conductor を切断し、timeout 後に同じ conductor を再接続すると、UART handle や
+managed client / server を再起動せず通信が復帰した。
+
+この固定 board / wiring profile では、managed client / server に runtime UART override を追加する要件は
+確認されなかったため、上記の決定を維持する。単一 firmware で peripheral、pin、line coding を現場変更する
+具体的な deployment requirement が生じた場合は、protocol option ではなく reopen configuration を所有する
+transport-level contract として再検討する。

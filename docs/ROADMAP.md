@@ -55,7 +55,8 @@ AtomVM が提供する機能の範囲で、完全な protocol coverage、client 
 - [ ] automatic-direction RS485 transceiver での echo / turnaround / frame gap 確認
 - [x] 実 RS485 cable の disconnect / reconnect と request recovery の確認
 - [ ] broadcast、diagnostics、device identification の外部 implementation との確認
-- [ ] 実機要件に基づき、managed reopen を保つ runtime UART override の必要性を再評価
+- [x] 実機要件に基づき、managed reopen を保つ runtime UART override の必要性を再評価
+  - 現在の固定 board / wiring profile では追加せず、application configuration と injected transport を維持
 
 ## 優先度 2: AtomVM 実機と resource 検証
 
