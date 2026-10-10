@@ -23,13 +23,15 @@ XIAO ESP32-C5          TTL <-> RS485
 ---------------        -------------
 3V3              --->  VCC
 GND              --->  GND
-D4 / GPIO23 TX   --->  RXD / DI
-D5 / GPIO24 RX   <---  TXD / RO
+D4 / GPIO23 TX   --->  TXD
+D5 / GPIO24 RX   <---  RXD
                        A -------- RS485 A
                        B -------- RS485 B
 ```
 
-transceiver の pin 名は製品によって異なるため、実物の表示を確認してください。
+この配線は検証に使用した HW-519 (MAX485 + CD4069) module のものです。この module の
+`TXD` / `RXD` 表示は MCU 側 UART と同名で接続します。transceiver によって pin 名の基準が
+異なるため、別製品では回路図または datasheet を確認してください。
 
 ### UART1 を使用する理由
 
@@ -45,8 +47,8 @@ D6 / GPIO11 ---- UART0 TX ---- AtomVM console
 D7 / GPIO12 ---- UART0 RX ---- AtomVM console
                                 keep free for console
 
-D4 / GPIO23 ---- UART1 TX ---> RS485 module RXD / DI
-D5 / GPIO24 ---- UART1 RX <--- RS485 module TXD / RO
+D4 / GPIO23 ---- UART1 TX ---> HW-519 TXD
+D5 / GPIO24 ---- UART1 RX <--- HW-519 RXD
                                 AVModbus
 ```
 

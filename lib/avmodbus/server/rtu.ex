@@ -616,7 +616,7 @@ defmodule AVModbus.Server.RTU do
   defp garbled(state), do: %{count(state, :bus_communication_error) | garbage: true}
 
   defp count(state, counter) do
-    counters = Map.update!(state.counters, counter, &(&1 + 1))
+    counters = Map.put(state.counters, counter, Map.get(state.counters, counter) + 1)
     %{state | counters: counters}
   end
 
