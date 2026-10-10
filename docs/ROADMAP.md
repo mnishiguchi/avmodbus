@@ -42,6 +42,8 @@ AtomVM が提供する機能の範囲で、完全な protocol coverage、client 
 - XIAO ESP32-C5 上で bounded TCP socket / process / heap pressure と 3-cycle recovery を確認済み
 - 2 台の XIAO ESP32-C5 と HW-519 automatic-direction RS485 transceiver で RTU function `0x03` を
   9,600 / 19,200 / 38,400 / 115,200 baud、8N1 で確認済み
+- 9,600 baud の polling 中に実 RS485 `A` conductor を切断して timeout を確認し、再接続後は
+  client / server を再起動せず連続 response に復帰することを確認済み
 - board 固有 UART 設定は application configuration、動的 UART ownership は injected transport に分離
 
 今後は新しい API の追加より、実 device での相互運用性、fault recovery、resource usage の検証を優先します。
@@ -51,7 +53,7 @@ AtomVM が提供する機能の範囲で、完全な protocol coverage、client 
 - [ ] USB-RS485 adapter と実 Modbus device を使った client / server 動作確認
 - [x] 9,600 / 19,200 / 38,400 / 115,200 baud での動作確認
 - [ ] automatic-direction RS485 transceiver での echo / turnaround / frame gap 確認
-- [ ] 実 UART cable の disconnect / reconnect と recovery の確認
+- [x] 実 RS485 cable の disconnect / reconnect と request recovery の確認
 - [ ] broadcast、diagnostics、device identification の外部 implementation との確認
 - [ ] 実機要件に基づき、managed reopen を保つ runtime UART override の必要性を再評価
 

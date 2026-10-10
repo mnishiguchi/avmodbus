@@ -117,6 +117,16 @@ mix atomvm.esp32.monitor --port /dev/ttyACM_CLIENT
 role を確認します。この検証は request / response の成立を確認するもので、echo、turnaround、frame gap の
 個別計測を完了したものではありません。
 
+## RS485 cable disconnect / reconnect 実機検証
+
+9,600 baud で client が 5 秒間隔の polling を継続している間に、2 台の HW-519 間の `A` conductor を
+実際に切断しました。client console で `modbus: request failed :timeout` を確認してから同じ conductor を
+再接続し、board、application、managed client のいずれも再起動せず、4 回連続して
+`modbus: registers [0]` に復帰することを確認しています。
+
+この試験は RS485 line loss に対する request-level recovery の確認です。UART peripheral 自体は open のまま
+なので、UART driver が `:closed` を返した場合の managed reopen / backoff の実機確認とは区別します。
+
 ## Modbus ASCII
 
 client / server とも `MODBUS_MODE=ascii` を指定します。一般的な 7E1 設定の例:
