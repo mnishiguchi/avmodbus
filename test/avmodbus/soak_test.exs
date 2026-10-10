@@ -12,6 +12,7 @@ defmodule AVModbus.SoakTest do
   @register_count 64
   @request_timeout 1_000
   @memory_growth_limit 4_096
+  @warmup_iterations 128
 
   test "RTU, ASCII, and TCP client/server pairs remain correct and bounded" do
     duration_ms = soak_seconds() * 1_000
@@ -21,6 +22,10 @@ defmodule AVModbus.SoakTest do
     on_exit(fn -> Enum.each(scenarios, &stop_scenario/1) end)
 
     assert eventually(fn -> Enum.all?(scenarios, &connected?/1) end)
+
+    # Populate bounded protocol state, including the 64-entry serial event log,
+    # before comparing steady-state process memory.
+    Enum.each(scenarios, &warm_up/1)
     Process.sleep(50)
 
     tracked = tracked_processes(scenarios)
@@ -41,6 +46,13 @@ defmodule AVModbus.SoakTest do
     processes_after = :erlang.system_info(:process_count)
     memory_after = process_memory(tracked)
 
+    IO.puts(
+      "soak complete: duration=#{duration_ms}ms interval=#{interval_ms}ms " <>
+        "warmup=#{@warmup_iterations} iterations=#{inspect(summaries)}, " <>
+        "processes #{processes_before}->#{processes_after}, " <>
+        "memory #{inspect(memory_before)}->#{inspect(memory_after)}"
+    )
+
     assert Enum.all?(summaries, fn {_name, iterations} -> iterations > 0 end)
     assert processes_after <= processes_before + 2
 
@@ -55,13 +67,14 @@ defmodule AVModbus.SoakTest do
       assert Process.alive?(client_pid(scenario.client))
       assert connected?(scenario)
     end)
+  end
 
-    IO.puts(
-      "soak complete: duration=#{duration_ms}ms interval=#{interval_ms}ms " <>
-        "iterations=#{inspect(summaries)}, " <>
-        "processes #{processes_before}->#{processes_after}, " <>
-        "memory #{inspect(memory_before)}->#{inspect(memory_after)}"
-    )
+  defp warm_up(scenario), do: warm_up(scenario, 0)
+  defp warm_up(_scenario, @warmup_iterations), do: :ok
+
+  defp warm_up(scenario, iteration) do
+    transact(scenario, iteration)
+    warm_up(scenario, iteration + 1)
   end
 
   defp start_serial(mode) do
@@ -134,29 +147,33 @@ defmodule AVModbus.SoakTest do
 
       {scenario.name, iterations}
     else
-      address = rem(iterations, @register_count)
-      value = rem(iterations, 65_536)
-
-      write =
-        Client.send_request(
-          scenario.client,
-          1,
-          {:write_single_register, address, value},
-          timeout: @request_timeout
-        )
-
-      read =
-        Client.send_request(
-          scenario.client,
-          1,
-          {:read_holding_registers, address, 1},
-          timeout: @request_timeout
-        )
-
-      collect_results(%{write => :ok, read => {:ok, [value]}})
+      transact(scenario, iterations)
       if interval_ms > 0, do: Process.sleep(interval_ms)
       exercise(scenario, deadline, interval_ms, iterations + 1)
     end
+  end
+
+  defp transact(scenario, iteration) do
+    address = rem(iteration, @register_count)
+    value = rem(iteration, 65_536)
+
+    write =
+      Client.send_request(
+        scenario.client,
+        1,
+        {:write_single_register, address, value},
+        timeout: @request_timeout
+      )
+
+    read =
+      Client.send_request(
+        scenario.client,
+        1,
+        {:read_holding_registers, address, 1},
+        timeout: @request_timeout
+      )
+
+    collect_results(%{write => :ok, read => {:ok, [value]}})
   end
 
   defp collect_results(expected) when map_size(expected) == 0, do: :ok

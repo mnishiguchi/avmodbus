@@ -7,7 +7,8 @@ Modbus protocol 実装は repository root の `avmodbus` library にあり、こ
 ## 検証環境
 
 - Seeed Studio XIAO ESP32-C5
-- AtomVM `v0.7.0-beta.0`
+- AtomVM runtime target: [`release-0.7`](https://github.com/atomvm/AtomVM/tree/release-0.7)
+- Tested firmware baseline: `v0.7.0-beta.0+git.8d3e051`
 - Erlang/OTP `28.5.0.7`
 - Elixir `1.19.6-otp-28`
 - AtomVM console: UART0 (D6 / GPIO11 TX, D7 / GPIO12 RX)
@@ -71,6 +72,11 @@ mix atomvm.esp32.install --version v0.7.0-beta.0
 mix atomvm.esp32.flash --port /dev/ttyACM0
 mix atomvm.esp32.monitor --port /dev/ttyACM0
 ```
+
+上の install command は実機 baseline を再現するためのものです。project の compatibility target は
+AtomVM `release-0.7` branch です。ExAtomVM は host-side packager、`:atomvm` Hex dependency は
+supported-API / opcode metadata で、どちらも device runtime image とは独立しています。branch head の
+firmware を使う場合は AtomVM source から build し、hard-limit 調査では対応する ELF / map file も保存してください。
 
 既定では RTU client として起動し、Holding Register を定期的に読みます。
 
@@ -175,7 +181,10 @@ baseline と budget の更新方針は [`../../docs/ARTIFACT_SIZE.md`](../../doc
 | `MODBUS_MEASURE_MEMORY` | `false` | startup 前後の ESP32 heap と client / server process memory を出力するか |
 | `MODBUS_RESOURCE_PROBE` | `false` | TCP loopback の bounded resource recovery probe を起動するか |
 | `MODBUS_RESOURCE_PROBE_CYCLES` | `3` | resource probe の反復回数 |
-| `MODBUS_RESOURCE_PROBE_CONNECTIONS` | `4` | cycle ごとの loopback client / server connection 数 |
+| `MODBUS_RESOURCE_PROBE_CONNECTIONS` | `4` | cycle ごとの loopback client / server connection 数。安全確認済み範囲は `1..4` |
+| `MODBUS_WORKFLOW_PROBE` | `false` | real RS485 representative workflow probe を起動するか |
+| `MODBUS_WORKFLOW_PROBE_CYCLES` | `3` | workflow probe の反復回数 |
+| `MODBUS_WORKFLOW_GAP_MS` | `20` | workflow probe の送信前 gap。`0` は baud rate から算出 |
 | `ATOMVM_UART_PERIPHERAL` | `UART1` | UART peripheral |
 | `ATOMVM_UART_SPEED` | `9600` | baud rate |
 | `ATOMVM_UART_TX_PIN` | `23` | TX GPIO (XIAO ESP32-C5 D4) |
@@ -184,6 +193,7 @@ baseline と budget の更新方針は [`../../docs/ARTIFACT_SIZE.md`](../../doc
 | `ATOMVM_UART_PARITY` | `none` | `none` / `even` / `odd` |
 | `ATOMVM_UART_STOP_BITS` | `1` | stop bits |
 | `MODBUS_ECHO` | `false` | adapter echo を除去するか |
+| `MODBUS_RTU_GAP_MS` | `0` | 通常 RTU client / server の送信前 gap。`0` は baud rate から算出 |
 | `MODBUS_SILENCE_MS` | `20` | unknown-length frame の silent interval |
 | `MODBUS_BROADCAST_TURNAROUND_MS` | `100` | broadcast write 後の待ち時間 |
 | `MODBUS_HANDLER_TIMEOUT_MS` | `10000` | server handler timeout |
@@ -257,6 +267,58 @@ mix atomvm.esp32.monitor --port /dev/ttyACM0
 `before / peak / after cleanup` の process count、free heap、largest free block を出力します。
 全 request result、5 秒以内の process cleanup、steady-state baseline から 32 KiB 以内の free-heap recovery が成功した場合だけ最終的に
 `modbus_resource_probe result=ok` を出力します。
+
+retained probe はこの board / firmware で回復を確認した `1..4` connections だけを受け付けます。
+`0` 以下は invalid configuration、`5` 以上は `unsafe_connection_count` として socket を開く前に停止します。
+hard-limit 調査では production example の guard を緩めず、symbol 付き runtime と一時 diagnostic build を使用してください。
+
+AtomVM `0.7.0-beta.0+git.8d3e051` では複数の loopback socket をまとめて閉じた際、ESP32 socket driver が
+`event_queue` への enqueue failure を出力する場合があります。これは bounded FreeRTOS queue の platform
+warning です。probe の最終結果が `ok` で、各 cycle の process count と free heap が回復していれば、
+AVModbus の resource leak を示すものではありません。hard-limit 付近の挙動とは区別してください。
+
+## Real RS485 workflow probe
+
+通常の RTU server image を一方の board に flash した後、もう一方に compile-time workflow probe を
+flash すると、実 RS485 bus 上で registers、coils、mask write、read/write multiple、file record、FIFO、
+diagnostics、device identification、broadcast と exception response を連続確認できます。
+
+```sh
+# Server board
+MIX_ENV=prod mix clean
+MODBUS_ROLE=server MIX_ENV=prod mix atomvm.packbeam
+MODBUS_ROLE=server MIX_ENV=prod \
+  mix atomvm.esp32.flash --port /dev/ttyACM_SERVER
+
+# Client/probe board
+MIX_ENV=prod mix clean
+MODBUS_WORKFLOW_PROBE=true MIX_ENV=prod mix atomvm.packbeam
+MODBUS_WORKFLOW_PROBE=true MIX_ENV=prod \
+  mix atomvm.esp32.flash --port /dev/ttyACM_CLIENT
+mix atomvm.esp32.monitor --port /dev/ttyACM_CLIENT
+```
+
+probe は最初に write-single response が request と同一 frame になる性質を使い、`echo: true` で
+local adapter echo の有無を分類します。その後は `echo: false` で 20-step workflow を 3 cycle
+実行します。transport wrapper が response read と次の UART write の時刻を記録し、configured RTU gap
+以上であることを確認します。broadcast write の所要時間も configured turnaround 以上で、その直後の
+read が更新値を返す場合だけ成功です。最後の `modbus_workflow result=ok` line に request 数と timing
+summary を出力します。
+
+この計測は AtomVM UART API 境界の millisecond timestamp であり、RS485 waveform の oscilloscope / logic
+analyzer 計測を置き換えるものではありません。`MODBUS_RESOURCE_PROBE` と同時には有効にしないでください。
+`MODBUS_WORKFLOW_GAP_MS=0` で protocol から算出した gap を使い、正の値で hardware margin を比較できます。
+
+検証した XIAO ESP32-C5 / HW-519 pair の 9,600 baud run では local echo はありませんでした。protocol から
+算出した 5 ms では第 2 cycle、10 ms では第 3 cycle に request timeout が再現し、20 ms では 3 cycle / 60
+request がすべて成功しました。20 ms run の UART API 境界で観測した最小 response-to-next-write interval は
+37 ms、100 ms に設定した broadcast turnaround の request elapsed は 130 ms でした。このため workflow
+probe の既定値は、この hardware profile で安定した 20 ms としています。
+
+同じ margin を通常 application に適用する場合は、client / server image の build と flash の両方で
+`MODBUS_RTU_GAP_MS=20` を指定します。この値は RTU request / response の送信前 delay だけを上書きし、
+unknown-length frame を確定する `MODBUS_SILENCE_MS` には影響しません。個別の injected transport 利用時は
+従来どおり managed client / server の `gap:` option で上書きできます。
 
 ## トラブルシューティング
 

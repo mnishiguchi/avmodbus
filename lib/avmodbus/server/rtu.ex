@@ -18,8 +18,14 @@ defmodule AVModbus.Server.RTU do
 
   @default_echo Application.compile_env(:avmodbus, :modbus_echo, false)
   @default_silence Application.compile_env(:avmodbus, :modbus_silence_ms, 20)
-  @default_speed Application.compile_env(:avmodbus, :uart_speed, 9_600)
-  @default_gap_ms div(AVModbus.RTU.frame_gap_us(@default_speed) + 999, 1_000)
+  @default_gap_ms (
+                    configured = Application.compile_env(:avmodbus, :modbus_rtu_gap_ms, 0)
+                    speed = Application.compile_env(:avmodbus, :uart_speed, 9_600)
+
+                    if configured == 0,
+                      do: div(AVModbus.RTU.frame_gap_us(speed) + 999, 1_000),
+                      else: configured
+                  )
   @default_handler_timeout Application.compile_env(
                              :avmodbus,
                              :modbus_handler_timeout_ms,

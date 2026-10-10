@@ -37,11 +37,13 @@ defmodule AVModbus.Client do
   @default_echo Application.compile_env(:avmodbus, :modbus_echo, false)
   @default_turnaround Application.compile_env(:avmodbus, :modbus_broadcast_turnaround_ms, 100)
   @default_speed Application.compile_env(:avmodbus, :uart_speed, 9_600)
-  @default_gap_ms div(AVModbus.RTU.frame_gap_us(@default_speed) + 999, 1_000)
+  @configured_gap_ms Application.compile_env(:avmodbus, :modbus_rtu_gap_ms, 0)
+  @calculated_gap_ms div(AVModbus.RTU.frame_gap_us(@default_speed) + 999, 1_000)
+  @default_gap_ms if(@configured_gap_ms == 0, do: @calculated_gap_ms, else: @configured_gap_ms)
   @default_silence Application.compile_env(
                      :avmodbus,
                      :modbus_silence_ms,
-                     max(20, 2 * @default_gap_ms)
+                     max(20, 2 * @calculated_gap_ms)
                    )
   @default_backoff Application.compile_env(
                      :avmodbus,

@@ -46,6 +46,19 @@
 | 2026-10-09 | XIAO ESP32-C5 用の bounded TCP resource recovery probe を追加し、AtomVM 非対応の `Map.pop/2` を TCP runtime path から除去 |
 | 2026-10-10 | soak harness の ExUnit 60 秒 timeout を除去し、RTU / ASCII / TCP combined 10 分 baseline を確認 |
 | 2026-10-10 | 2 台の XIAO ESP32-C5 / HW-519 で real RS485 RTU 5 分 device baseline を確認 |
+| 2026-10-10 | ESP32-C5 の TCP hard-limit probe が recoverable error より先に AtomVM runtime failure に至ることを切り分け、roadmap item を未完了のまま blocker を記録 |
+| 2026-10-10 | bounded TCP probe cleanup の event-queue warning を AtomVM ESP32 socket driver の bounded queue backpressure と特定し、AVModbus resource leak ではないことを確認 |
+| 2026-10-11 | RTU / ASCII / TCP combined host soak を 1 時間実行し、steady-state warm-up を追加した高負荷 run で memory bound と process-count recovery を確認 |
+| 2026-10-11 | pymodbus 3.15.0 と RTU / ASCII broadcast、diagnostics、event log、device identification の external interoperability を追加検証 |
+| 2026-10-11 | ESP32-C5 TCP hard-limit blocker の環境、bounded control、failure mode、安全な再現条件を AtomVM upstream 向け report に整理 |
+| 2026-10-11 | XIAO ESP32-C5 / HW-519 の 20-step real-RS485 workflow probe を追加し、echo なし、20 ms gap、100 ms broadcast turnaround で 3 cycle / 60 request を確認 |
+| 2026-10-11 | 通常 RTU client / server に compile-time gap override を追加し、20 ms gap の normal client で rapid polling 86 request / failure 0 を実機確認 |
+| 2026-10-11 | retained TCP resource probe を実機確認済みの 1..4 connections に制限し、危険な hard-limit configuration を socket open 前に拒否 |
+| 2026-10-11 | Linux subprocess の real `:emfile` を再現し、TCP client reconnect と TCP server restart の capacity recovery test を追加 |
+| 2026-10-11 | AtomVM target を `release-0.7` と明確化し、head `1f372559` まで socket / timer hard-limit path に変更がないことを監査 |
+| 2026-10-11 | 通常の実機 compatibility test を公式 `v0.7.0-beta.0` image に固定し、source build を matching symbol が必要な upstream crash diagnostic に限定 |
+| 2026-10-11 | 利用可能な hardware に合わせ、USB-RS485 adapter / commercial device を completion criteria から外し、real bus は 2 台の XIAO / HW-519、independent peer は pymodbus / libmodbus で検証する scope に確定 |
+| 2026-10-11 | resource exhaustion item を、host の real `:emfile` recovery、AtomVM の bounded device recovery、現行公式 runtime の hard-limit failure という supported boundary で解決。runtime path 更新時の再評価条件を記録 |
 
 ## 現在の検証状況
 
@@ -81,6 +94,12 @@
 - host soak harness の combined 10 分実行（1 ms interval）で RTU 299,222、ASCII 299,208、
   TCP 298,507 iteration が成功。process count は 126 のまま、最大 memory growth は RTU server の
   1,872 bytes で、設定した 4,096-byte bound 内
+- combined host soak を 1 ms interval で 1 時間完走し、request correctness と process count 126 → 126 を維持。
+  cold baseline との比較では RTU server が 3,976 → 8,864 bytes となったため、bounded 64-entry serial
+  event log を 128 verified iteration で満たしてから baseline を取るよう harness を修正。0 ms interval の
+  5 分 accelerated run は RTU 5,225,194、ASCII 5,249,427、TCP 3,099,286 iteration、process count
+  126 → 126 で成功し、RTU / ASCII server memory はともに 8,864 → 5,848 bytes。unbounded growth ではなく
+  cold-to-steady-state measurement artifact だったことを確認
 - XIAO ESP32-C5 の RTU server で 1 秒間隔の health telemetry を 10 回連続取得。warm-up 後は
   free heap 148,032 bytes、process count 7、memory process 576 bytes、server process 940 bytes、
   両 mailbox length 0 で安定し、全 snapshot で `status=:connected`
@@ -96,6 +115,11 @@
 - property suite を各 property 2,000 case で実行して成功
 - pymodbus peer と TCP の read / write / exception / device identification を双方向確認
 - pymodbus peer と RTU / ASCII の read / write / exception / device identification を双方向確認
+- pymodbus peer と RTU / ASCII diagnostics echo を双方向確認。pymodbus client → AVModbus server では
+  bus message counter、communication event counter / log、basic device identification を decode し、
+  unit `0` broadcast write が response なしで holding register `40` を `4242` に更新することを確認。
+  逆方向の broadcast は pymodbus server が unit `0` を unit `1` datastore に展開しない peer limitation のため、
+  diagnostics と device identification のみを reciprocal coverage とした
 - pymodbus peer と TCP / RTU / ASCII の custom function `0x41` / generic MEI `0x0D` を双方向確認
 - libmodbus 3.1.11 peer と TCP / RTU の read / write / mask / read-write / exception を双方向確認
 - pymodbus と libmodbus の全 interoperability tag を同時に有効化し、198 tests / 6 properties が成功
@@ -116,6 +140,11 @@
 - 最初の device run で TCP response path の `Map.pop/2` が AtomVM では `undef` になることを検出。
   client response と server eviction を `Map.fetch/2` + `Map.delete/2` に置換し、同じ diagnostic artifact で
   `modbus_resource_probe result=ok cycles=3` を確認。socket cleanup 時の AtomVM event-queue warning は継続追跡
+- installed firmware `0.7.0-beta.0+git.8d3e051` に含まれる warning 文字列と AtomVM ESP32
+  `socket_driver.c` を照合し、cleanup warning は lwIP callback を 32-entry `netconn_events` queue と
+  16-entry global `event_queue` へ通知する platform path の queue backpressure と特定。warning を挟んでも
+  probe は 3 cycle 連続で process count と free heap の recovery 判定に成功しており、AVModbus resource leak
+  の証拠ではない。AtomVM runtime 更新時の再評価対象として tracking を完了
 - compatibility fix 後の default production `sample_app.avm` は 126,020 bytes、SHA-256 は
   `ee7c4f5fb6cacdd0595ac52fe13a19bf13bf28b04463e25fc61516ab540ff8ae`。
   intentional 140-byte increase として regression budget を 126,200 bytes に更新し、180 bytes の headroom を維持
@@ -123,4 +152,36 @@
   200 tests / 6 properties が成功
 - default production artifact を XIAO ESP32-C5 に復元し、12 秒 monitor で正常 boot と
   RTU client の連続 2 回の `:timeout` 後の継続動作を確認
-- real RS485 peer との interoperability test は未完了
+- TCP hard-limit 検証で managed client 8 個を同時に起動すると、AtomVM timer manager の 5 秒 call timeout 後に
+  application が終了した。接続を逐次化した managed client probe と raw loopback socket probe でも
+  recoverable な `:emfile` / `:enfile` / `:enobufs` / `:enomem` / `:system_limit` は観測できず、raw probe は
+  ESP-IDF の `abort()` (`PC 0x4201fa15`) に至った。危険な diagnostic mode は repository に残さず、
+  AtomVM runtime 側を symbol 付き build で調査できるまで hard-limit roadmap item は未完了とする。
+  環境、known-good control、failure mode と安全な再調査手順は
+  [`../ATOMVM_TCP_HARD_LIMIT.md`](../ATOMVM_TCP_HARD_LIMIT.md) に整理
+- XIAO ESP32-C5 / HW-519 の real RS485 で compile-time workflow probe を実行。write-single response の
+  request echo 特性と read-back を組み合わせて local adapter echo なしと分類し、register / coil、mask write、
+  read-write multiple、file record、FIFO、diagnostics、device identification、broadcast、exception response の
+  20 step を検証。calculated 5 ms gap は第 2 cycle、10 ms は第 3 cycle に timeout が再現したが、20 ms は
+  3 cycle / 60 request が成功。UART API 境界の最小 response-to-next-write は 37 ms、100 ms broadcast
+  turnaround の request elapsed は 130 ms で、直後の read も更新値を返した。waveform 計測とは区別する
+- workflow probe は compile-time opt-in のため、default production `sample_app.avm` は 126,012 bytes、
+  SHA-256 は `e5399b923a9730f2bc98ec0f44634e0f683b49b87c8c36a065f6930fbc87a1cb` で、
+  126,200-byte budget 内に 188 bytes の headroom を維持
+- workflow で確認した hardware margin を通常 application に適用できるよう、`MODBUS_RTU_GAP_MS` から
+  client / server 共通の compile-time default gap を設定可能にした。`0` は従来どおり baud rate から算出し、
+  explicit `gap:` option は引き続き優先する。20 ms override と request interval 0 ms の normal client を
+  10 秒 monitor し、real RS485 function `0x03` は 86 response、failure 0
+- retained resource probe に 1..4 connections の fail-closed guard を追加。5 connections の host run は
+  ESP32 固有 API や socket を呼ぶ前に `unsafe_connection_count` を返した。4 connections の実機 regression は
+  3 cycle とも process count 4 -> 27 -> 4 に回復し、cycle 1 の free heap は
+  136,508 -> 117,176 -> 135,936 bytes、cycle 2 は 135,772 -> 116,464 -> 135,220 bytes、cycle 3 は
+  135,064 -> 116,440 -> 135,192 bytes、最終 result は `ok`。その後 normal RTU server を復元
+- Linux subprocess の file-descriptor soft limit を 64 に下げ、loopback listener で実際の `:emfile` を発生。
+  managed TCP client は status に `{:disconnected, :emfile}` を保持し、descriptor を 8 個解放すると再接続して
+  holding register request に成功。TCP server startup も exhaustion 中は `{:error, :emfile}`、解放後は
+  `{:listening, 0}` で正常起動することを確認。AtomVM は error return 前に runtime failure となるため未完了のまま
+- AtomVM `release-0.7` head `1f372559`（2026-10-04）を installed firmware commit `8d3e051` と比較。
+  間の 4 commit は version metadata と MAP_EXT key order の修正だけで、ESP32 socket driver、event queue、
+  timer manager、scheduler timer path は同一。beta.0 release asset は ESP32-C5 image / checksum のみで
+  ELF / map を含まないため、symbol 付き source build なしに abort PC を確実に解決できないことを確認

@@ -6,7 +6,7 @@
 - [0002: protocol core と transport を分離する](0002-protocol-transport-boundary.md)
 - [0003: serial client / server は managed process で policy を共有する](0003-managed-serial-policy.md)
 - [0004: server application boundary を transport から分離する](0004-server-boundary.md)
-- [0005: AtomVM prerelease と host toolchain を pin する](0005-atomvm-toolchain.md)
+- [0005: AtomVM runtime target と host toolchain を分離して管理する](0005-atomvm-toolchain.md)
 - [0006: managed TCP client は AtomVM-compatible active socket を所有する](0006-use-atomvm-compatible-active-tcp-client.md)
 - [0007: Modbus TCP connection を独立 process で隔離する](0007-isolate-modbus-tcp-connections.md)
 - [0008: client と server handler の result contract を統一する](0008-unify-result-contract.md)

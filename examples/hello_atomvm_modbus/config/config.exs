@@ -23,6 +23,7 @@ uart_parity =
 modbus_echo = System.get_env("MODBUS_ECHO") in ["1", "true", "yes"]
 measure_memory = System.get_env("MODBUS_MEASURE_MEMORY") in ["1", "true", "yes"]
 resource_probe = System.get_env("MODBUS_RESOURCE_PROBE") in ["1", "true", "yes"]
+workflow_probe = System.get_env("MODBUS_WORKFLOW_PROBE") in ["1", "true", "yes"]
 
 modbus_role =
   case System.get_env("MODBUS_ROLE") do
@@ -48,6 +49,7 @@ config :avmodbus,
   uart_stop_bits: parse_integer.("ATOMVM_UART_STOP_BITS", 1),
   uart_parity: uart_parity,
   modbus_echo: modbus_echo,
+  modbus_rtu_gap_ms: parse_integer.("MODBUS_RTU_GAP_MS", 0),
   modbus_silence_ms: parse_integer.("MODBUS_SILENCE_MS", 20),
   modbus_broadcast_turnaround_ms: parse_integer.("MODBUS_BROADCAST_TURNAROUND_MS", 100),
   modbus_handler_timeout_ms: parse_integer.("MODBUS_HANDLER_TIMEOUT_MS", 10_000),
@@ -69,4 +71,7 @@ config :sample_app,
   resource_probe: resource_probe,
   resource_probe_cycles: parse_integer.("MODBUS_RESOURCE_PROBE_CYCLES", 3),
   resource_probe_connections: parse_integer.("MODBUS_RESOURCE_PROBE_CONNECTIONS", 4),
+  workflow_probe: workflow_probe,
+  workflow_probe_cycles: parse_integer.("MODBUS_WORKFLOW_PROBE_CYCLES", 3),
+  workflow_probe_gap_ms: parse_integer.("MODBUS_WORKFLOW_GAP_MS", 20),
   measure_memory: measure_memory

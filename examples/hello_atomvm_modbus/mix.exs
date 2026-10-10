@@ -3,9 +3,16 @@ defmodule SampleApp.MixProject do
 
   def project do
     start_module =
-      if System.get_env("MODBUS_RESOURCE_PROBE") in ["1", "true", "yes"],
-        do: SampleApp.ResourceProbe,
-        else: SampleApp
+      cond do
+        System.get_env("MODBUS_RESOURCE_PROBE") in ["1", "true", "yes"] ->
+          SampleApp.ResourceProbe
+
+        System.get_env("MODBUS_WORKFLOW_PROBE") in ["1", "true", "yes"] ->
+          SampleApp.WorkflowProbe
+
+        true ->
+          SampleApp
+      end
 
     [
       app: :sample_app,

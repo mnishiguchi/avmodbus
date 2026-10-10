@@ -17,6 +17,7 @@ Initial development release:
 - per-request keyword options for synchronous timeout/retry and asynchronous delivery
 - configurable client-wide default request timeout with per-request overrides
 - deterministic zero-timeout probes when an immediate transmission requires no serial gap
+- compile-time RTU gap override for automatic-direction transceivers that need additional margin
 - explicit fail-closed errors for unsupported Modbus/TCP Security options on AtomVM
 - TCP half-close, reset, invalid-stream, and silent-peer recovery coverage
 - sustained RTU/ASCII noise, checksum-corruption, fragmentation, and frame-burst stress coverage
@@ -30,10 +31,13 @@ Initial development release:
 - bounded TCP client wait queues with explicit saturation and recovery behavior
 - AtomVM-compatible TCP response and eviction paths without unavailable `Map.pop/2`
 - opt-in ESP32 TCP socket/process/heap pressure and recovery probe
+- fail-closed connection-count guard for the retained ESP32 resource probe
+- opt-in Linux file-descriptor exhaustion and recovery integration test
 - sparse in-memory data model, diagnostics, broadcast, authorization, and device identification
 - Modbus V1.1b3 application examples and malformed-frame conformance vectors
 - property tests and bidirectional pymodbus TCP, RTU, and ASCII interoperability tests,
   including registered custom-function and generic-MEI PDUs
 - bidirectional libmodbus TCP and RTU interoperability tests
 
-The package targets AtomVM `v0.7.0-beta.0` and has no runtime dependencies.
+The package tracks AtomVM's `release-0.7` runtime branch, uses
+`v0.7.0-beta.0+git.8d3e051` as its tested device baseline, and has no runtime dependencies.

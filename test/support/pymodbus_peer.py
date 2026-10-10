@@ -4,6 +4,7 @@
     python pymodbus_peer.py server rtu|ascii DEVICE
     python pymodbus_peer.py client tcp PORT
     python pymodbus_peer.py client rtu|ascii DEVICE
+    python pymodbus_peer.py serial-features-client rtu|ascii DEVICE
     python pymodbus_peer.py extension-server tcp PORT
     python pymodbus_peer.py extension-client rtu|ascii DEVICE
 
@@ -134,7 +135,7 @@ def server(transport, target, extensions=False):
     asyncio.run(serve())
 
 
-def client(transport, target, extensions=False):
+def connect(transport, target):
     from pymodbus.client import ModbusSerialClient, ModbusTcpClient
 
     if transport == "tcp":
@@ -152,6 +153,11 @@ def client(transport, target, extensions=False):
         )
     if not connection.connect():
         raise RuntimeError("could not connect to AVModbus server")
+    return connection
+
+
+def client(transport, target, extensions=False):
+    connection = connect(transport, target)
 
     if extensions:
         connection.register(CustomEchoPDU)
@@ -230,6 +236,64 @@ def client(transport, target, extensions=False):
     connection.close()
 
 
+def serial_features_client(transport, target):
+    if transport not in ("rtu", "ascii"):
+        raise ValueError("serial features require RTU or ASCII")
+
+    connection = connect(transport, target)
+
+    def checked(name, response):
+        if response.isError():
+            raise RuntimeError(f"{name}: exception {response.exception_code}")
+        return response
+
+    checked("clear counters", connection.diag_clear_counters(device_id=1))
+
+    query = checked(
+        "query data", connection.diag_query_data(b"\xA5\x37", device_id=1)
+    )
+    print("diagnostics_query ok", bytes(query.message).hex(), flush=True)
+
+    bus_count = checked(
+        "bus message count", connection.diag_read_bus_message_count(device_id=1)
+    )
+    print("diagnostics_bus_message_count ok", bus_count.message, flush=True)
+
+    event_counter = checked(
+        "event counter", connection.diag_get_comm_event_counter(device_id=1)
+    )
+    print("diagnostics_event_counter ok", event_counter.count, flush=True)
+
+    event_log = checked(
+        "event log", connection.diag_get_comm_event_log(device_id=1)
+    )
+    print(
+        "diagnostics_event_log ok",
+        event_log.event_count,
+        event_log.message_count,
+        len(event_log.events),
+        flush=True,
+    )
+
+    identity = checked(
+        "device identification",
+        connection.read_device_information(
+            read_code=1, object_id=0, device_id=1
+        ),
+    )
+    values = [identity.information[index].decode() for index in range(3)]
+    print("device_identification ok", *values, flush=True)
+
+    connection.write_register(
+        40,
+        4242,
+        device_id=0,
+        no_response_expected=True,
+    )
+    print("broadcast ok", flush=True)
+    connection.close()
+
+
 if __name__ == "__main__":
     arguments = sys.argv[1:]
 
@@ -245,5 +309,7 @@ if __name__ == "__main__":
         server(transport, target, extensions=True)
     elif role == "extension-client":
         client(transport, target, extensions=True)
+    elif role == "serial-features-client":
+        serial_features_client(transport, target)
     else:
         client(transport, target)

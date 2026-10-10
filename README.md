@@ -6,7 +6,8 @@
 - Elixir namespace: `AVModbus`
 - runtime dependency: なし
 - 主対象: Modbus RTU / ASCII over UART / RS485、Modbus TCP
-- 対象 AtomVM: `v0.7.0-beta.0`
+- 対象 AtomVM runtime: [`release-0.7`](https://github.com/atomvm/AtomVM/tree/release-0.7)
+- 実機 baseline: `v0.7.0-beta.0+git.8d3e051`
 
 ESP32 上で動かすサンプル application は [`examples/hello_atomvm_modbus`](examples/hello_atomvm_modbus/README.md) に分離しています。
 
@@ -30,7 +31,7 @@ ESP32 上で動かすサンプル application は [`examples/hello_atomvm_modbus
 
 custom function / MEI payload も low-level API から扱えます。
 
-未完了の項目は [`docs/ROADMAP.md`](docs/ROADMAP.md) にまとめています。
+完了条件、検証状況、platform constraint は [`docs/ROADMAP.md`](docs/ROADMAP.md) にまとめています。
 
 ## 基本構成
 
@@ -259,8 +260,14 @@ SOAK_SECONDS=3600 SOAK_TRANSPORT=tcp mix test --include soak test/avmodbus/soak_
 
 `SOAK_SECONDS` を設定しない通常の test suite では soak test を除外します。
 
+測定前に各 transport で 128 verified iteration を実行し、serial diagnostics の bounded event log などを
+steady state にします。完了 summary は assertion より先に出力するため、memory bound failure が起きても
+全 transport の iteration、process count、before / after memory を診断に利用できます。
+
 `pymodbus` との TCP / RTU / ASCII interoperability tests は独立した Python process を peer として使います。
 serial tests は test-only PTY bridge を使用し、OS package や library runtime dependency を追加しません。
+RTU / ASCII では通常の read / write に加え、diagnostics echo を双方向、pymodbus client から AVModbus
+server への diagnostic counter / event log、device identification、unit `0` broadcast write を検証します。
 専用 virtual environment を用意し、その Python を明示したときだけ実行されます。
 
 ```sh
@@ -283,7 +290,7 @@ root package の `:atomvm` dependency は optional / `runtime: false` です。A
 ## ドキュメント
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): 現在の設計と責務分離
-- [`docs/ROADMAP.md`](docs/ROADMAP.md): 未完了の作業
+- [`docs/ROADMAP.md`](docs/ROADMAP.md): 完了条件、検証状況、platform constraint
 - [`docs/adr`](docs/adr/README.md): 長期的に残す設計判断
 - [`docs/worklog`](docs/worklog/README.md): 開発の主要マイルストーン
 

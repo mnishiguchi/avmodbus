@@ -26,6 +26,15 @@ defmodule AVModbus.PymodbusInteropTest do
     "read_holding_registers exception 2"
   ]
   @extension_expected ["custom ok 3 2 1", "mei ok 5 4"]
+  @serial_features_expected [
+    "diagnostics_query ok a537",
+    "diagnostics_bus_message_count ok 2",
+    "diagnostics_event_counter ok 2",
+    "diagnostics_event_log ok 2 4 9",
+    "device_identification ok AVModbus Serial 0.1.0",
+    "broadcast ok"
+  ]
+  @serial_identification %{0 => "AVModbus", 1 => "Serial", 2 => "0.1.0"}
 
   defp python, do: System.fetch_env!("PYMODBUS_PYTHON")
 
@@ -80,6 +89,10 @@ defmodule AVModbus.PymodbusInteropTest do
 
     assert Client.encapsulated_interface_transport(client, 1, 0x0D, <<4, 5>>, timeout_ms) ==
              {:ok, <<5, 4>>}
+  end
+
+  defp check_serial_diagnostics_client(client, timeout_ms) do
+    assert Client.diagnostics(client, 1, 0, [0xA537], timeout_ms) == {:ok, [0xA537]}
   end
 
   defp extension_handler(1, {:custom, 0x41, <<1, 2, 3>>}), do: {:ok, <<3, 2, 1>>}
@@ -170,6 +183,7 @@ defmodule AVModbus.PymodbusInteropTest do
       end)
 
       check_client(client, 3_000, peer_port)
+      check_serial_diagnostics_client(client, 3_000)
     end
 
     test "pymodbus #{transport} client interoperates with an AVModbus server" do
@@ -222,6 +236,46 @@ defmodule AVModbus.PymodbusInteropTest do
 
       assert run_peer_client(PTYTransport.path(pty), transport_mode, "extension-client") ==
                @extension_expected
+    end
+
+    test "pymodbus #{transport} broadcast, diagnostics, and device identification interoperate with an AVModbus server" do
+      transport_mode = unquote(transport)
+      {:ok, pty} = PTYTransport.start_link(python())
+      {:ok, memory} = Memory.start_link(holding_registers: 100)
+      server_module = unquote(if(transport == :rtu, do: RTUServer, else: ASCIIServer))
+
+      {:ok, server} =
+        server_module.start_link(PTYTransport, pty, {Memory, memory},
+          units: [1],
+          gap: 0,
+          identification: @serial_identification
+        )
+
+      on_exit(fn ->
+        if Process.alive?(elem(server, 1)), do: server_module.close(server)
+        if Process.alive?(memory), do: GenServer.stop(memory)
+        if Process.alive?(pty), do: PTYTransport.close(pty)
+      end)
+
+      assert run_peer_client(
+               PTYTransport.path(pty),
+               transport_mode,
+               "serial-features-client"
+             ) == @serial_features_expected
+
+      assert eventually(fn -> Memory.get(memory, :holding_register, 40) == [4242] end)
+    end
+  end
+
+  defp eventually(function, attempts \\ 100)
+  defp eventually(_function, 0), do: false
+
+  defp eventually(function, attempts) do
+    if function.() do
+      true
+    else
+      Process.sleep(10)
+      eventually(function, attempts - 1)
     end
   end
 

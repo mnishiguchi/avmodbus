@@ -7,6 +7,7 @@ if Application.compile_env(:sample_app, :resource_probe, false) do
 
     @cycles Application.compile_env(:sample_app, :resource_probe_cycles, 3)
     @connections Application.compile_env(:sample_app, :resource_probe_connections, 4)
+    @safe_connection_limit 4
     @requests_per_client 4
     @handler_delay_ms 100
     @request_timeout_ms 2_000
@@ -16,7 +17,8 @@ if Application.compile_env(:sample_app, :resource_probe, false) do
       Process.sleep(100)
 
       result =
-        with :ok <- warm_up() do
+        with :ok <- validate_configuration(),
+             :ok <- warm_up() do
           run_cycles(1)
         end
 
@@ -29,6 +31,24 @@ if Application.compile_env(:sample_app, :resource_probe, false) do
       end
 
       Process.sleep(:infinity)
+    end
+
+    defp validate_configuration do
+      cond do
+        @cycles < 1 ->
+          {:error, {:invalid_cycles, @cycles}}
+
+        @connections < 1 ->
+          {:error, {:invalid_connection_count, @connections}}
+
+        @connections > @safe_connection_limit ->
+          {:error,
+           {:unsafe_connection_count, @connections,
+            {:verified_maximum, @safe_connection_limit}}}
+
+        true ->
+          :ok
+      end
     end
 
     defp warm_up, do: run_cycle("warmup", snapshot(), false)

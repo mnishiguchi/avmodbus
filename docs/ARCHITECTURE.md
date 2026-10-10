@@ -75,6 +75,8 @@ RTU / ASCII / TCP の framing や UART / socket access は持ちません。こ�
 - synchronous / asynchronous request で同じ deadline model を使用
 - queue 待ち時間も timeout に含める
 - RTU では送信前に 3.5-character gap を確保
+- built-in profile では `:modbus_rtu_gap_ms` が `0` の場合に baud rate から gap を算出し、
+  automatic-direction hardware が追加 margin を必要とする deployment では正の compile-time 値で上書き
 - unit `0` の write を broadcast として扱い、response は読まない
 - adapter echo を必要に応じて除去
 - UART open / read / write failure 後は bounded exponential backoff で reopen
@@ -207,6 +209,7 @@ GPIO、baud rate、parity、board pinout、firmware install、polling loop は l
 - Modbus TCP は MBAP codec と managed client / server を実装済み
 - RTU-over-TCP は未実装
 - test-only duplex transport と TCP loopback を使う opt-in host soak harness を提供済み
-- real RS485 peer と AtomVM device 上での長時間 interoperability / soak test は未完了
+- XIAO ESP32-C5 / HW-519 間の real RS485 baseline と workflow soak は完了済み
+- independent software peer との interoperability は pymodbus / libmodbus で検証し、USB-RS485 adapter / commercial device は project scope 外
 - retry は write の重複実行を避けるため、一般的な自動 retry としては提供していない
 - Modbus/TCP Security は AtomVM に mutual-authenticated TLS client / server API がないため未実装
