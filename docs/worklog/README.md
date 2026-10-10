@@ -45,6 +45,7 @@
 | 2026-10-09 | zero-timeout serial probe の clock-tick race を修正し、即時 attempt contract を固定 |
 | 2026-10-09 | XIAO ESP32-C5 用の bounded TCP resource recovery probe を追加し、AtomVM 非対応の `Map.pop/2` を TCP runtime path から除去 |
 | 2026-10-10 | soak harness の ExUnit 60 秒 timeout を除去し、RTU / ASCII / TCP combined 10 分 baseline を確認 |
+| 2026-10-10 | 2 台の XIAO ESP32-C5 / HW-519 で real RS485 RTU 5 分 device baseline を確認 |
 
 ## 現在の検証状況
 
@@ -83,6 +84,9 @@
 - XIAO ESP32-C5 の RTU server で 1 秒間隔の health telemetry を 10 回連続取得。warm-up 後は
   free heap 148,032 bytes、process count 7、memory process 576 bytes、server process 940 bytes、
   両 mailbox length 0 で安定し、全 snapshot で `status=:connected`
+- XIAO ESP32-C5 / HW-519 の real RS485 RTU を 100 ms interval で 5 分実行し、1,623 request 成功、
+  failure 0。client 29 回 / server 32 回の health snapshot はすべて `status=:connected`、mailbox 0 で、
+  warm-up 後の free heap と managed process memory は安定
 - periodic telemetry 追加後の default production `sample_app.avm` は 123,404 bytes、
   SHA-256 は `76069e17d3064c4bb2cc614947effe302c1c12d6e341abae53f5a4ab5994fb45`、
   126,000-byte budget 内

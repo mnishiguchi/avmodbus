@@ -39,6 +39,8 @@ AtomVM が提供する機能の範囲で、完全な protocol coverage、client 
   - 1 ms interval で RTU 299,222、ASCII 299,208、TCP 298,507 iteration、process count 126 → 126、
     managed process memory growth は 4,096-byte bound 内
 - XIAO ESP32-C5 の長時間検証向けに connection state / heap / process / mailbox の periodic telemetry を整備済み
+- 2 台の XIAO ESP32-C5 / HW-519 の real RS485 で 5 分の RTU device baseline を確認済み
+  - 100 ms polling で 1,623 request 成功、failure 0、全 health snapshot で connected / mailbox 0
 - TCP client の未送信 queue を bounded にし、saturation error と capacity recovery を検証済み
 - client-wide default timeout を XIAO ESP32-C5 の RTU client で起動・連続 timeout 確認済み
 - XIAO ESP32-C5 上で bounded TCP socket / process / heap pressure と 3-cycle recovery を確認済み
