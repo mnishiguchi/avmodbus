@@ -69,6 +69,8 @@ AtomVM が提供する機能の範囲で、完全な protocol coverage、client 
   - [x] TCP client wait queue の saturation error と capacity recovery を host 上で確認
   - [x] AtomVM device 上で bounded socket / process / heap pressure と recovery を確認
   - [ ] AtomVM device 上で hard-limit exhaustion error と recovery を確認
+    - 2026-10-10 の ESP32-C5 検証では、recoverable な socket error を返す前に AtomVM runtime が
+      timer manager timeout または native abort に至ったため未完了。bounded probe は引き続き成功
   - [ ] loopback socket cleanup 時の AtomVM event-queue warning を追跡
 - [ ] Seeed Studio XIAO ESP32-C5 上で representative workflow を継続検証
 

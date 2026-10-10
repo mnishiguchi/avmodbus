@@ -46,6 +46,7 @@
 | 2026-10-09 | XIAO ESP32-C5 用の bounded TCP resource recovery probe を追加し、AtomVM 非対応の `Map.pop/2` を TCP runtime path から除去 |
 | 2026-10-10 | soak harness の ExUnit 60 秒 timeout を除去し、RTU / ASCII / TCP combined 10 分 baseline を確認 |
 | 2026-10-10 | 2 台の XIAO ESP32-C5 / HW-519 で real RS485 RTU 5 分 device baseline を確認 |
+| 2026-10-10 | ESP32-C5 の TCP hard-limit probe が recoverable error より先に AtomVM runtime failure に至ることを切り分け、roadmap item を未完了のまま blocker を記録 |
 
 ## 現在の検証状況
 
@@ -123,4 +124,9 @@
   200 tests / 6 properties が成功
 - default production artifact を XIAO ESP32-C5 に復元し、12 秒 monitor で正常 boot と
   RTU client の連続 2 回の `:timeout` 後の継続動作を確認
+- TCP hard-limit 検証で managed client 8 個を同時に起動すると、AtomVM timer manager の 5 秒 call timeout 後に
+  application が終了した。接続を逐次化した managed client probe と raw loopback socket probe でも
+  recoverable な `:emfile` / `:enfile` / `:enobufs` / `:enomem` / `:system_limit` は観測できず、raw probe は
+  ESP-IDF の `abort()` (`PC 0x4201fa15`) に至った。危険な diagnostic mode は repository に残さず、
+  AtomVM runtime 側を symbol 付き build で調査できるまで hard-limit roadmap item は未完了とする
 - real RS485 peer との interoperability test は未完了
