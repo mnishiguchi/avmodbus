@@ -47,6 +47,7 @@
 | 2026-10-10 | soak harness の ExUnit 60 秒 timeout を除去し、RTU / ASCII / TCP combined 10 分 baseline を確認 |
 | 2026-10-10 | 2 台の XIAO ESP32-C5 / HW-519 で real RS485 RTU 5 分 device baseline を確認 |
 | 2026-10-10 | ESP32-C5 の TCP hard-limit probe が recoverable error より先に AtomVM runtime failure に至ることを切り分け、roadmap item を未完了のまま blocker を記録 |
+| 2026-10-10 | bounded TCP probe cleanup の event-queue warning を AtomVM ESP32 socket driver の bounded queue backpressure と特定し、AVModbus resource leak ではないことを確認 |
 
 ## 現在の検証状況
 
@@ -117,6 +118,11 @@
 - 最初の device run で TCP response path の `Map.pop/2` が AtomVM では `undef` になることを検出。
   client response と server eviction を `Map.fetch/2` + `Map.delete/2` に置換し、同じ diagnostic artifact で
   `modbus_resource_probe result=ok cycles=3` を確認。socket cleanup 時の AtomVM event-queue warning は継続追跡
+- installed firmware `0.7.0-beta.0+git.8d3e051` に含まれる warning 文字列と AtomVM ESP32
+  `socket_driver.c` を照合し、cleanup warning は lwIP callback を 32-entry `netconn_events` queue と
+  16-entry global `event_queue` へ通知する platform path の queue backpressure と特定。warning を挟んでも
+  probe は 3 cycle 連続で process count と free heap の recovery 判定に成功しており、AVModbus resource leak
+  の証拠ではない。AtomVM runtime 更新時の再評価対象として tracking を完了
 - compatibility fix 後の default production `sample_app.avm` は 126,020 bytes、SHA-256 は
   `ee7c4f5fb6cacdd0595ac52fe13a19bf13bf28b04463e25fc61516ab540ff8ae`。
   intentional 140-byte increase として regression budget を 126,200 bytes に更新し、180 bytes の headroom を維持

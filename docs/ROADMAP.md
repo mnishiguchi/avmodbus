@@ -71,7 +71,11 @@ AtomVM が提供する機能の範囲で、完全な protocol coverage、client 
   - [ ] AtomVM device 上で hard-limit exhaustion error と recovery を確認
     - 2026-10-10 の ESP32-C5 検証では、recoverable な socket error を返す前に AtomVM runtime が
       timer manager timeout または native abort に至ったため未完了。bounded probe は引き続き成功
-  - [ ] loopback socket cleanup 時の AtomVM event-queue warning を追跡
+  - [x] loopback socket cleanup 時の AtomVM event-queue warning を追跡
+    - AtomVM `0.7.0-beta.0+git.8d3e051` の ESP32 socket driver が socket callback を
+      bounded FreeRTOS event queue へ enqueue できない場合の platform warning と特定
+    - warning 発生後も 3 cycle すべてで AVModbus process / heap recovery は成功。library leak とは扱わず、
+      AtomVM runtime 更新時に再評価
 - [ ] Seeed Studio XIAO ESP32-C5 上で representative workflow を継続検証
 
 ## AtomVM platform に依存する制約

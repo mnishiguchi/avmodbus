@@ -258,6 +258,11 @@ mix atomvm.esp32.monitor --port /dev/ttyACM0
 全 request result、5 秒以内の process cleanup、steady-state baseline から 32 KiB 以内の free-heap recovery が成功した場合だけ最終的に
 `modbus_resource_probe result=ok` を出力します。
 
+AtomVM `0.7.0-beta.0+git.8d3e051` では複数の loopback socket をまとめて閉じた際、ESP32 socket driver が
+`event_queue` への enqueue failure を出力する場合があります。これは bounded FreeRTOS queue の platform
+warning です。probe の最終結果が `ok` で、各 cycle の process count と free heap が回復していれば、
+AVModbus の resource leak を示すものではありません。hard-limit 付近の挙動とは区別してください。
+
 ## トラブルシューティング
 
 OTP 28 で firmware download 時に `:ssl.versions/0` の load error が出る場合は、SSL application を起動した `mix run` 経由で image を download できます。
