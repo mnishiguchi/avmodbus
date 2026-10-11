@@ -175,7 +175,7 @@ defmodule AVModbus.ClientTest do
     {:ok, response} = RTU.encode(1, <<0x03, 0x04, 0x00, 0x0A, 0x01, 0x02>>)
     <<first::binary-size(4), rest::binary>> = response
     {:ok, transport} = FakeTransport.start_link([<<0xFF, first::binary>>, rest])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     request = {:read_holding_registers, 0, 2}
 
@@ -192,7 +192,7 @@ defmodule AVModbus.ClientTest do
     {:ok, response} = ASCII.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     <<first::binary-size(5), rest::binary>> = response
     {:ok, transport} = FakeTransport.start_link(["noise" <> first, rest])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(FakeTransport, transport, 1, request, 100, mode: :ascii) ==
              {:ok, [42]}
@@ -211,7 +211,7 @@ defmodule AVModbus.ClientTest do
     {:ok, transport} =
       FakeTransport.start_link([echo_head, <<echo_tail::binary, request_frame::binary>>])
 
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(FakeTransport, transport, 3, request, 100,
              mode: :ascii,
@@ -229,7 +229,7 @@ defmodule AVModbus.ClientTest do
     {:ok, transport} =
       FakeTransport.start_link([echo_head, <<echo_tail::binary, response_frame::binary>>])
 
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(FakeTransport, transport, 1, request, 100, echo: true) ==
              {:ok, [42]}
@@ -244,8 +244,8 @@ defmodule AVModbus.ClientTest do
     {:ok, plain_transport} = FakeTransport.start_link([request_frame])
 
     on_exit(fn ->
-      if Process.alive?(echo_transport), do: Agent.stop(echo_transport)
-      if Process.alive?(plain_transport), do: Agent.stop(plain_transport)
+      stop_agent(echo_transport)
+      stop_agent(plain_transport)
     end)
 
     assert Client.transaction(FakeTransport, echo_transport, 3, request, 100, echo: true) ==
@@ -256,7 +256,7 @@ defmodule AVModbus.ClientTest do
 
   test "validates serial client options" do
     {:ok, transport} = FakeTransport.start_link([])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.start_link(FakeTransport, transport, echo: :yes) ==
              {:error, :invalid_echo_option}
@@ -286,7 +286,7 @@ defmodule AVModbus.ClientTest do
   test "returns Modbus exceptions" do
     {:ok, response} = RTU.encode(1, <<0x83, 0x02>>)
     {:ok, transport} = FakeTransport.start_link([response])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(
              FakeTransport,
@@ -302,7 +302,7 @@ defmodule AVModbus.ClientTest do
     {:ok, response} = RTU.encode(1, <<0x17, 0x04, 0x00, 0x2A, 0x01, 0x02>>)
     <<first::binary-size(3), rest::binary>> = response
     {:ok, transport} = FakeTransport.start_link([first, rest])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(FakeTransport, transport, 1, request, 100) ==
              {:ok, [42, 258]}
@@ -317,7 +317,7 @@ defmodule AVModbus.ClientTest do
     {:ok, response} = RTU.encode(1, response_pdu)
     <<first::binary-size(4), rest::binary>> = response
     {:ok, transport} = FakeTransport.start_link([first, rest])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(FakeTransport, transport, 1, :get_comm_event_log, 100) ==
              {:ok, %{status: 0, event_count: 3, message_count: 5, events: [0x40, 0x20]}}
@@ -335,8 +335,8 @@ defmodule AVModbus.ClientTest do
     {:ok, client} = Client.start_link(FakeTransport, transport)
 
     on_exit(fn ->
-      if Process.alive?(elem(client, 1)), do: Client.close(client)
-      if Process.alive?(transport), do: Agent.stop(transport)
+      stop_client(client)
+      stop_agent(transport)
     end)
 
     assert Client.read_device_identification(client, 1, :basic, 100) ==
@@ -354,8 +354,8 @@ defmodule AVModbus.ClientTest do
     {:ok, client} = Client.start_link(FakeTransport, transport, silence: 1)
 
     on_exit(fn ->
-      if Process.alive?(elem(client, 1)), do: Client.close(client)
-      if Process.alive?(transport), do: Agent.stop(transport)
+      stop_client(client)
+      stop_agent(transport)
     end)
 
     assert Client.custom(client, 1, 100, <<1, 2>>, 100) == {:ok, <<9, 8, 7>>}
@@ -367,8 +367,8 @@ defmodule AVModbus.ClientTest do
     {:ok, client} = Client.start_link(FakeTransport, transport, silence: 1)
 
     on_exit(fn ->
-      if Process.alive?(elem(client, 1)), do: Client.close(client)
-      if Process.alive?(transport), do: Agent.stop(transport)
+      stop_client(client)
+      stop_agent(transport)
     end)
 
     assert Client.encapsulated_interface_transport(client, 1, 13, <<1, 2>>, 100) ==
@@ -379,7 +379,7 @@ defmodule AVModbus.ClientTest do
     {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     chunks = for <<byte <- response>>, do: {10, <<byte>>}
     {:ok, transport} = DelayedTransport.start_link(chunks)
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(
              DelayedTransport,
@@ -396,8 +396,8 @@ defmodule AVModbus.ClientTest do
     {:ok, client} = Client.start_link(DelayedTransport, transport, gap: 0, timeout: 5)
 
     on_exit(fn ->
-      if Process.alive?(elem(client, 1)), do: Client.close(client)
-      if Process.alive?(transport), do: Agent.stop(transport)
+      stop_client(client)
+      stop_agent(transport)
     end)
 
     assert Client.read_holding_registers(client, 1, 0, 1) == {:error, :timeout}
@@ -407,7 +407,7 @@ defmodule AVModbus.ClientTest do
   test "allows an immediately available response with a zero timeout" do
     {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     {:ok, transport} = FakeTransport.start_link([response])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(
              FakeTransport,
@@ -422,7 +422,7 @@ defmodule AVModbus.ClientTest do
   test "waits for the configured RTU gap before transmission" do
     {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     {:ok, transport} = FakeTransport.start_link([response])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     started_at = System.monotonic_time(:millisecond)
 
@@ -440,7 +440,7 @@ defmodule AVModbus.ClientTest do
 
   test "does not transmit when the RTU gap cannot fit the deadline" do
     {:ok, transport} = FakeTransport.start_link([])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(
              FakeTransport,
@@ -460,8 +460,8 @@ defmodule AVModbus.ClientTest do
     {:ok, client} = Client.start_link(ConcurrentTransport, transport)
 
     on_exit(fn ->
-      if Process.alive?(elem(client, 1)), do: Client.close(client)
-      if Process.alive?(transport), do: Agent.stop(transport)
+      stop_client(client)
+      stop_agent(transport)
     end)
 
     requests =
@@ -502,8 +502,8 @@ defmodule AVModbus.ClientTest do
       end)
 
     on_exit(fn ->
-      if Process.alive?(elem(client, 1)), do: Client.close(client)
-      if Process.alive?(transport), do: Agent.stop(transport)
+      stop_client(client)
+      stop_agent(transport)
     end)
 
     reference =
@@ -537,8 +537,8 @@ defmodule AVModbus.ClientTest do
     {:ok, client} = Client.start_link(BlockingTransport, transport, gap: 0, timeout: 5)
 
     on_exit(fn ->
-      if Process.alive?(elem(client, 1)), do: Client.close(client)
-      if Process.alive?(transport), do: Agent.stop(transport)
+      stop_client(client)
+      stop_agent(transport)
     end)
 
     first = Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, 100) end)
@@ -559,8 +559,8 @@ defmodule AVModbus.ClientTest do
     {:ok, client} = Client.start_link(FakeTransport, transport)
 
     on_exit(fn ->
-      if Process.alive?(elem(client, 1)), do: Client.close(client)
-      if Process.alive?(transport), do: Agent.stop(transport)
+      stop_client(client)
+      stop_agent(transport)
     end)
 
     assert Client.send_request(client, 248, {:read_holding_registers, 0, 1}) ==
@@ -591,8 +591,8 @@ defmodule AVModbus.ClientTest do
     {:ok, client} = Client.start_link(BlockingTransport, transport)
 
     on_exit(fn ->
-      if Process.alive?(elem(client, 1)), do: Client.close(client)
-      if Process.alive?(transport), do: Agent.stop(transport)
+      stop_client(client)
+      stop_agent(transport)
     end)
 
     first = Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, 100) end)
@@ -665,7 +665,7 @@ defmodule AVModbus.ClientTest do
 
   test "broadcasts writes without reading a response and observes turnaround" do
     {:ok, transport} = FakeTransport.start_link([])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     started_at = System.monotonic_time(:millisecond)
 
@@ -690,8 +690,8 @@ defmodule AVModbus.ClientTest do
     {:ok, client} = Client.start_link(FakeTransport, transport)
 
     on_exit(fn ->
-      if Process.alive?(elem(client, 1)), do: Client.close(client)
-      if Process.alive?(transport), do: Agent.stop(transport)
+      stop_client(client)
+      stop_agent(transport)
     end)
 
     assert Client.write_multiple_registers(client, 0, 4, [1, 2], 500) == :ok
@@ -710,8 +710,8 @@ defmodule AVModbus.ClientTest do
     {:ok, client} = Client.start_link(FakeTransport, transport, echo: true, turnaround: 10)
 
     on_exit(fn ->
-      if Process.alive?(elem(client, 1)), do: Client.close(client)
-      if Process.alive?(transport), do: Agent.stop(transport)
+      stop_client(client)
+      stop_agent(transport)
     end)
 
     assert Client.write_multiple_registers(client, 0, 4, [1, 2], 100) == :ok
@@ -721,7 +721,7 @@ defmodule AVModbus.ClientTest do
 
   test "does not send a broadcast when its deadline cannot include turnaround" do
     {:ok, transport} = FakeTransport.start_link([])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(
              FakeTransport,
@@ -736,7 +736,7 @@ defmodule AVModbus.ClientTest do
 
   test "rejects reads to the broadcast unit before writing" do
     {:ok, transport} = FakeTransport.start_link([])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(
              FakeTransport,
@@ -751,7 +751,7 @@ defmodule AVModbus.ClientTest do
 
   test "rejects invalid unit ids before writing" do
     {:ok, transport} = FakeTransport.start_link([])
-    on_exit(fn -> if Process.alive?(transport), do: Agent.stop(transport) end)
+    on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(
              FakeTransport,
