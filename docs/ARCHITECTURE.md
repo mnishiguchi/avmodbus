@@ -1,5 +1,9 @@
 # アーキテクチャ
 
+この資料は、AVModbus の内部構造を変更する開発者向けです。最初に利用する場合は
+[Getting Started](GETTING_STARTED.md) を参照してください。API 名や protocol 固有の用語は原語を維持し、
+責務と判断理由を日本語で説明します。
+
 ## 方針
 
 AVModbus は、Modbus protocol の実装と AtomVM / UART / board 固有処理を分離します。
@@ -7,12 +11,12 @@ AVModbus は、Modbus protocol の実装と AtomVM / UART / board 固有処理�
 主な方針は次のとおりです。
 
 - protocol core は通常の BEAM 上でもテストできること
-- AtomVM runtime dependency を増やさないこと
-- 1 本の serial bus は 1 process が所有し、transaction を直列化すること
-- RTU / ASCII で共通化できる client / server policy は共有すること
+- AtomVM の実行時 dependency を増やさないこと
+- 1 本の serial bus は 1 process が所有し、transaction を順番に処理すること
+- RTU / ASCII で共通化できる Client / Server の方針は共有すること
 - board 固有設定は example / application 側に置くこと
 
-## UART configuration boundary
+## UART 設定の境界
 
 既定の `AVModbus.UART` adapter は peripheral、TX / RX pin、baud、data bits、parity、stop bits を
 firmware build 時の application configuration から取得します。これらは board wiring と deployment
@@ -64,7 +68,8 @@ RTU / ASCII / TCP の framing や UART / socket access は持ちません。こ�
 
 `AVModbus.ASCII` は hexadecimal framing、LRC、delimiter、stream resynchronization を扱います。
 
-`AVModbus.TCP` は MBAP header、transaction id、fragmented / concatenated TCP stream を扱います。connection lifecycle は managed TCP client または今後の server transport に委譲します。
+`AVModbus.TCP` は MBAP header、transaction id、fragmented / concatenated TCP stream を扱います。
+connection lifecycle は、AVModbus が接続状態を管理する TCP Client / Server が担当します。
 
 ## クライアント
 
@@ -74,7 +79,7 @@ RTU / ASCII / TCP の framing や UART / socket access は持ちません。こ�
 
 - synchronous / asynchronous request で同じ deadline model を使用
 - queue 待ち時間も timeout に含める
-- RTU では送信前に 3.5-character gap を確保
+- RTU では送信前に、19,200 baud 以下なら 3.5 character、より高速なら 1.75 ms の gap を確保
 - built-in profile では `:modbus_rtu_gap_ms` が `0` の場合に baud rate から gap を算出し、
   automatic-direction hardware が追加 margin を必要とする deployment では正の compile-time 値で上書き
 - unit `0` の write を broadcast として扱い、response は読まない
@@ -208,8 +213,8 @@ GPIO、baud rate、parity、board pinout、firmware install、polling loop は l
 - 主対象は serial Modbus RTU / ASCII
 - Modbus TCP は MBAP codec と managed client / server を実装済み
 - RTU-over-TCP は未実装
-- test-only duplex transport と TCP loopback を使う opt-in host soak harness を提供済み
-- XIAO ESP32-C5 / HW-519 間の real RS485 baseline と workflow soak は完了済み
-- independent software peer との interoperability は pymodbus / libmodbus で検証し、USB-RS485 adapter / commercial device は project scope 外
+- test 専用 duplex transport と TCP loopback を使う、任意実行の host soak test を提供済み
+- XIAO ESP32-C5 / HW-519 間の実 RS485 baseline と workflow soak は完了済み
+- 独立した software peer との相互運用性は pymodbus / libmodbus で検証済み。USB-RS485 adapter / commercial device は対象外
 - retry は write の重複実行を避けるため、一般的な自動 retry としては提供していない
 - Modbus/TCP Security は AtomVM に mutual-authenticated TLS client / server API がないため未実装

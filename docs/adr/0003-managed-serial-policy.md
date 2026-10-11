@@ -1,34 +1,18 @@
-# 0003: serial client / server は managed process で共通 policy を使う
-
-## 状態
-
-採用
+# 0003: serial Client / Server は managed process で方針を共有する
 
 ## 背景
 
-Modbus serial line では同じ bus 上で transaction を競合させず、frame timing、timeout、broadcast、echo、disconnect recovery を一貫して扱う必要がある。
-
-RTU と ASCII で framing は異なるが、transaction ownership と lifecycle policy の多くは共通である。
+1 本の serial bus では transaction、frame timing、timeout、broadcast、切断復旧を一貫して管理する必要がある。
 
 ## 決定
 
-### クライアント
+- managed process が UART を所有し、request を直列化する
+- queue 待ち時間を deadline に含める
+- RTU の frame gap、broadcast turnaround、optional echo suppression を transport で扱う
+- UART failure 後は bounded exponential backoff で reopen する
+- Server は unit filtering、broadcast、diagnostics、listen-only state を所有する
+- RTU / ASCII で request dispatch、handler、reconnect の方針を共有する
 
-- managed client process が UART を所有し、request を直列化する
-- sync / async request は同じ deadline model を使う
-- queue 待ち時間も timeout に含める
-- RTU は送信前に frame gap を確保する
-- broadcast write は response を読まず turnaround delay を待つ
-- optional adapter echo suppression を提供する
-- owned UART failure 後は bounded exponential backoff で reopen する
+## 影響
 
-### サーバー
-
-- serial server process が UART と line-level state を所有する
-- unit filtering、broadcast、diagnostics、event counters、listen-only state を transport 側で扱う
-- owned UART failure 後は state を保持したまま reopen する
-- RTU / ASCII は request dispatch、handler policy、reconnect policy を共有する
-
-## 理由
-
-serial bus の ownership と recovery responsibility を一箇所に集め、RTU / ASCII 間の behavior drift を避けるため。
+UART ownership と復旧責任が明確になり、RTU / ASCII 間の挙動差を抑えられる。

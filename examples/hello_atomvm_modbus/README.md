@@ -1,97 +1,178 @@
-# hello_atomvm_modbus
+# XIAO ESP32-C5 で Modbus RTU を試す
 
-`avmodbus` を AtomVM / ESP32 / RS485 で動かす最小サンプルです。
-
-Modbus protocol 実装は repository root の `avmodbus` library にあり、この example は firmware tooling、UART / board 設定、application entrypoint だけを担当します。
-
-## 検証環境
-
-- Seeed Studio XIAO ESP32-C5
-- AtomVM runtime target: [`release-0.7`](https://github.com/atomvm/AtomVM/tree/release-0.7)
-- Tested firmware baseline: `v0.7.0-beta.0+git.8d3e051`
-- Erlang/OTP `28.5.0.7`
-- Elixir `1.19.6-otp-28`
-- AtomVM console: UART0 (D6 / GPIO11 TX, D7 / GPIO12 RX)
-- Modbus: UART1
-- Modbus TX: D4 / GPIO23
-- Modbus RX: D5 / GPIO24
-- 3.3 V logic 対応の自動方向制御 TTL <-> RS485 transceiver
-
-## 配線
+このチュートリアルでは、2 台の Seeed Studio XIAO ESP32-C5 を RS485 で接続し、
+一方を Modbus RTU Client、もう一方を Server として動かします。
 
 ```text
-XIAO ESP32-C5          TTL <-> RS485
----------------        -------------
-3V3              --->  VCC
-GND              --->  GND
-D4 / GPIO23 TX   --->  TXD
-D5 / GPIO24 RX   <---  RXD
-                       A -------- RS485 A
-                       B -------- RS485 B
+XIAO A                  XIAO B
+Client                  Server
+  |                        |
+UART1                    UART1
+  |                        |
+HW-519 ===== RS485 ===== HW-519
 ```
 
-この配線は検証に使用した HW-519 (MAX485 + CD4069) module のものです。この module の
-`TXD` / `RXD` 表示は MCU 側 UART と同名で接続します。transceiver によって pin 名の基準が
-異なるため、別製品では回路図または datasheet を確認してください。
-
-各 HW-519 は接続先 XIAO の `3V3` から個別に給電します。2 台の XIAO 間では `GND`、`A`、`B` のみを
-接続し、別々の regulator 出力である `3V3` 同士は接続しません。短い bench 配線での検証時は
-termination resistor を使用していません。
-
-### UART1 を使用する理由
-
-XIAO ESP32-C5 の公式 pinout では D6 / GPIO11 が TX、D7 / GPIO12 が RX と表示されています。
-これらは ESP32-C5 の UART0 の既定 pin で、AtomVM firmware では console に使用されます。
-
-そのため、この example では AtomVM console と Modbus RTU / ASCII の通信が競合しないように、
-Modbus 用には別の UART1 を使用します。UART1 の TX / RX は ESP32-C5 の GPIO matrix を使って、
-D4 / GPIO23 (TX) と D5 / GPIO24 (RX) に割り当てます。
+最後に Client の console へ次のように表示されれば成功です。
 
 ```text
-D6 / GPIO11 ---- UART0 TX ---- AtomVM console
-D7 / GPIO12 ---- UART0 RX ---- AtomVM console
-                                keep free for console
-
-D4 / GPIO23 ---- UART1 TX ---> HW-519 TXD
-D5 / GPIO24 ---- UART1 RX <--- HW-519 RXD
-                                AVModbus
+modbus: registers [0]
 ```
 
-D4 / D5 は XIAO pinout 上では I2C 用の表示ですが、UART1 専用 pin という意味ではなく、
-GPIO matrix によって UART1 の信号を割り当てています。
+Modbus の用語が初めての場合は [Modbus の基礎](../../docs/MODBUS_BASICS.md) を先に参照してください。
 
-この構成により、USB 経由の AtomVM console を使いながら、同時に UART1 で RS485 / Modbus 通信を確認できます。
+## 1. 必要なもの
 
-## セットアップ
+- Seeed Studio XIAO ESP32-C5 × 2
+- 3.3 V logic 対応の自動方向制御 TTL ↔ RS485 transceiver（検証機: HW-519）× 2
+- breadboard と jumper wire
+- data 通信対応 USB cable × 2
+- AtomVM firmware `v0.7.0-beta.0`
+- Erlang/OTP `28.5.0.7`、Elixir `1.19.6-otp-28`（repository の `.tool-versions`）
+
+各 XIAO は USB から給電します。配線を変更するときは両方の USB cable を外してください。
+
+## 2. 配線する
+
+両方の XIAO で同じように接続します。
+
+| XIAO ESP32-C5 | HW-519 | 用途 |
+| --- | --- | --- |
+| `3V3` | `VCC` | module の電源 |
+| `GND` | `GND` | logic ground |
+| `D4 / GPIO23` (`UART1 TX`) | `TXD` | XIAO から送信 |
+| `D5 / GPIO24` (`UART1 RX`) | `RXD` | XIAO で受信 |
+
+次に 2 台の HW-519 を接続します。
+
+| Client 側 | Server 側 |
+| --- | --- |
+| `A+` | `A+` |
+| `B-` | `B-` |
+| `GND` | `GND` |
+
+この表は検証に使った **HW-519 固有**です。HW-519 の `TXD` / `RXD` は MCU 側 UART と同名で接続します。
+別の transceiver では `TX → RXD` のように交差させる製品もあるため、その製品の回路図を確認してください。
+
+重要な注意:
+
+- `A+` と `B-` は交差させません。
+- 2 台の XIAO の `GND` は共通にします。
+- 各 HW-519 は接続先 XIAO の `3V3` から個別に給電します。
+- 2 台の XIAO の `3V3` 同士は接続しません。
+- この短い bench 配線では termination resistor を使用していません。
+
+### UART1 を使う理由
+
+AtomVM console は UART0（D6 / GPIO11 TX、D7 / GPIO12 RX）を使います。
+Modbus を同じ UART に重ねると console の文字と Modbus frame が衝突します。
+そのため、Modbus は UART1 を D4 / GPIO23 と D5 / GPIO24 へ割り当てます。
+
+```text
+UART0: D6 / D7  ---> AtomVM console
+UART1: D4 / D5  ---> AVModbus / HW-519
+```
+
+## 3. build 環境を準備する
+
+repository root から sample directory へ移動し、toolchain と dependency を準備します。
 
 ```sh
 cd examples/hello_atomvm_modbus
 mise install
 mix deps.get
 mix atomvm.esp32.install --version v0.7.0-beta.0
-mix atomvm.esp32.flash --port /dev/ttyACM0
-mix atomvm.esp32.monitor --port /dev/ttyACM0
 ```
 
-上の install command は実機 baseline を再現するためのものです。project の compatibility target は
-AtomVM `release-0.7` branch です。ExAtomVM は host-side packager、`:atomvm` Hex dependency は
-supported-API / opcode metadata で、どちらも device runtime image とは独立しています。branch head の
-firmware を使う場合は AtomVM source から build し、hard-limit 調査では対応する ELF / map file も保存してください。
-
-既定では RTU client として起動し、Holding Register を定期的に読みます。
-
-## サーバーモード
+接続中の port を確認します。
 
 ```sh
-mix clean
-MODBUS_ROLE=server mix atomvm.packbeam
-MODBUS_ROLE=server mix atomvm.esp32.flash --port /dev/ttyACM0
-MODBUS_ROLE=server mix atomvm.esp32.monitor --port /dev/ttyACM0
+ls -l /dev/ttyACM*
 ```
 
-server mode では `AVModbus.Memory` を data model とする in-memory server を起動します。
+以降では Server board を `/dev/ttyACM_SERVER`、Client board を `/dev/ttyACM_CLIENT` と表記します。
+実際の `/dev/ttyACM0`、`/dev/ttyACM1` などへ置き換えてください。再接続すると番号が変わる場合があります。
 
-## RS485 baud-rate 実機検証
+## 4. Server board へ書き込む
+
+```sh
+MIX_ENV=prod mix clean
+MODBUS_ROLE=server MIX_ENV=prod mix atomvm.packbeam
+MODBUS_ROLE=server MIX_ENV=prod \
+  mix atomvm.esp32.flash --port /dev/ttyACM_SERVER
+```
+
+Server は `AVModbus.Memory` を使い、Unit ID `1` の Holding Register を提供します。
+
+必要なら Server の console を開き、起動を確認します。
+
+```sh
+mix atomvm.esp32.monitor --port /dev/ttyACM_SERVER
+```
+
+```text
+modbus: rtu server ready for unit 1
+```
+
+確認後は monitor を終了して構いません。Server application は動作を続けます。
+
+## 5. Client board へ書き込む
+
+```sh
+MIX_ENV=prod mix clean
+MIX_ENV=prod mix atomvm.packbeam
+MIX_ENV=prod mix atomvm.esp32.flash --port /dev/ttyACM_CLIENT
+```
+
+Client の console を開きます。
+
+```sh
+mix atomvm.esp32.monitor --port /dev/ttyACM_CLIENT
+```
+
+## 6. 通信を確認する
+
+Client は 5 秒ごとに Unit ID `1` の Holding Register address `0` を読みます。
+
+```text
+modbus: registers [0]
+modbus: registers [0]
+modbus: registers [0]
+```
+
+この表示が続けば、UART、RS485、Modbus RTU の request / response がすべて動作しています。
+
+## 7. うまくいかないとき
+
+### `modbus: request failed :timeout`
+
+1. Server board が起動しているか確認する
+2. `A+ ↔ A+`、`B- ↔ B-`、`GND ↔ GND` を確認する
+3. 両方が 9,600 baud、8N1、Unit ID `1` か確認する
+4. XIAO と HW-519 の `TXD` / `RXD` がこのページの表どおりか確認する
+5. jumper wire の接触を確認する
+
+### RXD LED が片側だけ点滅する
+
+Client が request を送れていても、Server が受信できていないか、response が戻っていない可能性があります。
+まず `GND`、A / B、Server application の起動を確認します。LED の点滅だけでは通信成功とは判断しません。
+
+### flash する board を間違えた
+
+同じ XIAO を 2 台接続すると `/dev/ttyACM*` だけでは見分けにくくなります。
+一度片方だけ接続して port を確認するか、USB serial number で対応を記録してください。
+
+### firmware download で SSL error が出る
+
+このページ末尾の [firmware download のトラブルシューティング](#firmware-download-のトラブルシューティング) を参照してください。
+
+---
+
+## 開発者向け検証
+
+ここから先は、最初の通信確認には不要です。baud rate、障害復旧、memory、長時間運転、resource limit を
+再検証するときに使用します。
+
+## RS485 baud rate の実機検証
 
 2 台の XIAO ESP32-C5 と 2 台の HW-519 を使い、8N1、unit ID 1、function `0x03`、holding register
 address 0 / quantity 1、5 秒間隔の条件で次の baud rate を確認しています。client console で
@@ -99,10 +180,10 @@ address 0 / quantity 1、5 秒間隔の条件で次の baud rate を確認して
 
 | Baud rate | 結果 |
 | ---: | --- |
-| 9,600 | pass |
-| 19,200 | pass |
-| 38,400 | pass |
-| 115,200 | pass |
+| 9,600 | 成功 |
+| 19,200 | 成功 |
+| 38,400 | 成功 |
+| 115,200 | 成功 |
 
 baud rate は compile-time configuration のため、server と client をそれぞれ clean build して flash します。
 次は 19,200 baud の例です。
@@ -123,7 +204,7 @@ mix atomvm.esp32.monitor --port /dev/ttyACM_CLIENT
 role を確認します。この検証は request / response の成立を確認するもので、echo、turnaround、frame gap の
 個別計測を完了したものではありません。
 
-## RS485 cable disconnect / reconnect 実機検証
+## RS485 cable の切断と再接続
 
 9,600 baud で client が 5 秒間隔の polling を継続している間に、2 台の HW-519 間の `A` conductor を
 実際に切断しました。client console で `modbus: request failed :timeout` を確認してから同じ conductor を
@@ -154,7 +235,7 @@ MODBUS_ROLE=server MODBUS_MODE=tcp MODBUS_TCP_PORT=502 mix atomvm.packbeam
 
 TCP client では `MODBUS_TCP_HOST` と `MODBUS_TCP_PORT` も指定します。
 
-## Artifact size budget
+## Artifact size の上限
 
 production artifact を build して size regression budget を確認します。
 
@@ -202,7 +283,7 @@ baseline と budget の更新方針は [`../../docs/ARTIFACT_SIZE.md`](../../doc
 
 これらは compile-time configuration として使われるため、設定を変えた場合は必要に応じて `mix clean` してから build してください。
 
-## Memory footprint measurement
+## Memory 使用量の測定
 
 AtomVM / ESP32 上で role startup 前後の heap と process memory を計測します。
 
@@ -216,7 +297,7 @@ server を計測する場合は clean 後、build と flash の両方で `MODBUS
 `modbus_memory` line は free heap delta、largest / minimum free heap、binary memory、process count、
 各 managed process の推定 byte 数を含みます。
 
-## Device soak telemetry
+## 実機 soak test の状態出力
 
 長時間の実機検証では `MODBUS_HEALTH_INTERVAL_MS` を正の値にして build / flash します。
 client / server の connection state、uptime、ESP32 free heap、minimum free heap、binary memory、
@@ -240,10 +321,10 @@ mix atomvm.esp32.monitor --port /dev/ttyACM0
 
 この telemetry は観測機能であり、それ自体を external Modbus peer との interoperability 成功とは扱いません。
 実 RS485 traffic を使った計測条件と結果は
-[`../../docs/MEMORY_FOOTPRINT.md`](../../docs/MEMORY_FOOTPRINT.md#2026-10-10-real-rs485-baseline)
-に記録しています。
+[Memory 使用量の実 RS485 基準値](../../docs/MEMORY_FOOTPRINT.md#2026-10-10-実-rs485-基準値)に
+記録しています。
 
-## Device resource recovery probe
+## 実機の resource recovery probe
 
 TCP server の connection cap、client の pending / wait queue、slow handler process を同時に動かし、
 `:queue_full`、正常 response、socket / process cleanup、free-heap recovery を loopback 上で反復確認できます。
@@ -277,7 +358,7 @@ AtomVM `0.7.0-beta.0+git.8d3e051` では複数の loopback socket をまとめ�
 warning です。probe の最終結果が `ok` で、各 cycle の process count と free heap が回復していれば、
 AVModbus の resource leak を示すものではありません。hard-limit 付近の挙動とは区別してください。
 
-## Real RS485 workflow probe
+## 実 RS485 workflow probe
 
 通常の RTU server image を一方の board に flash した後、もう一方に compile-time workflow probe を
 flash すると、実 RS485 bus 上で registers、coils、mask write、read/write multiple、file record、FIFO、
@@ -320,7 +401,7 @@ probe の既定値は、この hardware profile で安定した 20 ms として�
 unknown-length frame を確定する `MODBUS_SILENCE_MS` には影響しません。個別の injected transport 利用時は
 従来どおり managed client / server の `gap:` option で上書きできます。
 
-## トラブルシューティング
+## Firmware download のトラブルシューティング
 
 OTP 28 で firmware download 時に `:ssl.versions/0` の load error が出る場合は、SSL application を起動した `mix run` 経由で image を download できます。
 

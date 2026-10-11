@@ -1,59 +1,70 @@
-# avmodbus
+# AVModbus
 
-`avmodbus` は、AtomVM での利用を第一目標にした Modbus ライブラリです。
-
-- Mix / OTP application: `:avmodbus`
-- Elixir namespace: `AVModbus`
-- runtime dependency: なし
-- 主対象: Modbus RTU / ASCII over UART / RS485、Modbus TCP
-- 対象 AtomVM runtime: [`release-0.7`](https://github.com/atomvm/AtomVM/tree/release-0.7)
-- 実機 baseline: `v0.7.0-beta.0+git.8d3e051`
-
-ESP32 上で動かすサンプル application は [`examples/hello_atomvm_modbus`](examples/hello_atomvm_modbus/README.md) に分離しています。
-
-## 特徴
-
-- Modbus RTU / ASCII と Modbus TCP の managed client / server を提供
-- Modbus TCP client / server で IPv4 と IPv6 literal address をサポート
-- protocol 処理を UART や board 固有コードから分離
-- 通常の BEAM 上で protocol / transport tests を実行可能
-- AtomVM runtime では dependency-free
-- 1 本の serial bus 上の transaction を managed process で直列化
-- broadcast、adapter echo、timeout、UART reconnect を serial policy として処理
-- server handler、authorization、device identification、diagnostics を transport から分離
-- TCP request を transaction id で照合し、複数 request を並行処理
-
-## 対応状況
-
-主要な public function codes は client / server の両方向で実装済みです。
-
-`0x01`, `0x02`, `0x03`, `0x04`, `0x05`, `0x06`, `0x07`, `0x08`, `0x0B`, `0x0C`, `0x0F`, `0x10`, `0x11`, `0x14`, `0x15`, `0x16`, `0x17`, `0x18`, `0x2B/0x0E`
-
-custom function / MEI payload も low-level API から扱えます。
-
-完了条件、検証状況、platform constraint は [`docs/ROADMAP.md`](docs/ROADMAP.md) にまとめています。
-
-## 基本構成
+AVModbus は、AtomVM で使うことを第一に設計した Modbus ライブラリです。
 
 ```text
-Application
-    |
-    v
-AVModbus.Client / AVModbus.Server
-    |
-    v
-AVModbus.PDU
-    |
-    +---- AVModbus.RTU ------ CRC16 ----+
-    |                                   |
-    +---- AVModbus.ASCII ---- LRC ------+---- AVModbus.UART ---- AtomVM :uart / RS485
-    |
-    +---- AVModbus.TCP ------ MBAP framing
+AVModbus
+  |
+  +-- AtomVM 向けの Modbus ライブラリ
+  +-- Modbus RTU / ASCII / TCP
+  +-- Client / Server
 ```
 
-設計の詳細は [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) を参照してください。
+ESP32 などの小さな機器から Holding Register を読んだり、機器側の Modbus Server を作ったりできます。
+UART や RS485 を使う Modbus RTU / ASCII と、ネットワークを使う Modbus TCP に対応しています。
 
-## クライアントの例
+## はじめに知っておくこと
+
+Modbus と RS485 は同じものではありません。
+
+```text
+Modbus
+  └─ 何を送り、どう応答するかを決める通信ルール
+
+RS485
+  └─ データを電気信号としてどう運ぶかを決める方式
+```
+
+Modbus RTU は RS485 と組み合わせて使われることが多く、AVModbus では UART と
+RS485 transceiver を介して通信します。
+
+通信では、Client が要求を送り、Server が応答します。
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    C->>S: Holding Register 0 を 2 個読む
+    S-->>C: [123, 456]
+```
+
+初めて Modbus を使う場合は、先に [Modbus の基礎](docs/MODBUS_BASICS.md) を読むと、
+Unit ID、Coil、Holding Register、Function Code などの用語を短時間で確認できます。
+
+## 最短で試す
+
+目的に合わせて次の順に進んでください。
+
+1. [Modbus の基礎](docs/MODBUS_BASICS.md) — Modbus / RS485 とデータの種類を知る
+2. [Getting Started](docs/GETTING_STARTED.md) — AVModbus を追加して最初の request を送る
+3. [XIAO ESP32-C5 実機チュートリアル](examples/hello_atomvm_modbus/README.md) — 2 台の XIAO と HW-519 で通信する
+
+## できること
+
+- Modbus RTU / ASCII / TCP の Client と Server
+- Coil、Discrete Input、Input Register、Holding Register の種類に応じた読み取り / 書き込み
+- diagnostics、file record、FIFO、device identification などの標準 Function Code
+- timeout、読み取り request の retry、UART / TCP の再接続
+- supervision tree からの Client / Server 起動
+- broadcast と RS485 adapter echo の処理
+- `pymodbus` / `libmodbus` との相互運用テスト
+- AtomVM + ESP32-C5 + RS485 での実機検証
+
+対応範囲と実機で確認した内容は [ロードマップ](docs/ROADMAP.md) にまとめています。
+
+## Client の最小例
+
+UART の pin などを application configuration に設定してから Client を起動します。
 
 ```elixir
 {:ok, client} = AVModbus.Client.start_link(mode: :rtu, timeout: 1_000)
@@ -61,106 +72,32 @@ AVModbus.PDU
 {:ok, registers} =
   AVModbus.Client.read_holding_registers(client, 1, 0, 2)
 
-:ok = AVModbus.Client.write_single_register(client, 1, 10, 42)
-
-:ok = AVModbus.Client.close(client)
+IO.inspect(registers, label: "Holding Registers")
 ```
 
-caller を block しない request も利用できます。
+引数の `1` は Unit ID、`0` は先頭 address、`2` は読む register 数です。
+成功すると `{:ok, [value1, value2]}`、時間内に応答がなければ `{:error, :timeout}` が返ります。
 
-```elixir
-ref =
-  AVModbus.Client.send_request(
-    client,
-    1,
-    {:read_holding_registers, 0, 2},
-    timeout: 500,
-    to: self()
-  )
-
-receive do
-  {AVModbus.Client, ^ref, result} -> result
-end
-```
-
-ASCII を使う場合は `mode: :ascii` を指定します。
-
-Modbus TCP client は host と任意の port を指定します。
+Modbus TCP の場合は UART の代わりに接続先を指定します。
 
 ```elixir
 {:ok, client} =
-  AVModbus.Client.start_link(tcp: "192.168.1.20", port: 502, timeout: 1_000)
-{:ok, registers} = AVModbus.Client.read_holding_registers(client, 255, 0, 2)
+  AVModbus.Client.start_link(
+    tcp: "192.168.1.20",
+    port: 502,
+    timeout: 1_000
+  )
+
+AVModbus.Client.read_holding_registers(client, 1, 0, 2)
 ```
 
-`:timeout`、`:max_pending`、`:max_queue`、`:check_unit`、`:connect_timeout`、`:backoff` で
-request / connection policy を調整できます。`:timeout` の default は 1,000 ms で、request helper に
-timeout を指定しない場合に使われます。
-`max_pending` の default は 4、未送信 request を保持する `max_queue` の default は 64 です。
-queue が満杯なら request は wire に送られず `{:error, :queue_full}` となります。
-host application で無制限 queue が必要な場合だけ `max_queue: :infinity` を明示できます。
+## Server の最小例
 
-client は standard child specification を持ち、supervision tree に直接追加できます。
-supervisor が返す PID または `:name` で登録した名前を、そのまま client API に渡せます。
-
-```elixir
-children = [
-  {AVModbus.Client,
-   [tcp: "192.168.1.20", port: 502, name: :plc_client]}
-]
-
-Supervisor.start_link(children, strategy: :one_for_one)
-AVModbus.Client.read_holding_registers(:plc_client, 1, 0, 2)
-```
-
-各 request helper の最後の引数には従来の timeout millisecond、または keyword options を指定できます。
-request ごとの `timeout:` は client startup の default を上書きします。
-一時的な timeout / disconnect を再試行する場合は `retries:` を明示します。
-
-```elixir
-AVModbus.Client.read_holding_registers(
-  :plc_client,
-  1,
-  0,
-  2,
-  timeout: 500,
-  retries: 2,
-  backoff: {100, 1_000}
-)
-```
-
-`retry_request/4` も同じ policy の明示的な generic API として利用できます。retry の既定値は 0 で、
-write、diagnostics、custom request に正の `retries:` を指定すると送信前に拒否されます。
-Modbus exception や invalid response も
-retry されないため、device が処理済みか不明な write を replay しません。
-
-### Modbus/TCP Security
-
-AtomVM 0.7 の SSL API は client connection と `verify_none` のみで、TLS server listener、peer
-certificate verification、client certificate authentication を提供していません。このため
-Modbus/TCP Security を安全に実装できず、`tls:` / `ssl:` を指定した client / server startup は
-`{:error, :tls_not_supported}` を返して fail closed します。通常の Modbus TCP は利用できます。
-
-必要な AtomVM capability と採用条件は ADR 0015 に記録しています。
-
-client result と server handler result は同じ contract を使います。
-
-- 正常な read は `{:ok, value}`、正常な write は `:ok`
-- device の Modbus exception は `{:error, {:exception, reason}}`
-- request と一致しない response は `{:error, {:invalid_response, pdu}}`
-- transaction timeout は `{:error, :timeout}`
-- connection が利用できない場合は `{:error, :closed}`
-- TCP client の送信待ち queue が満杯の場合は `{:error, :queue_full}`
-
-exception 名と wire code は `AVModbus.exception_name/1` と `AVModbus.exception_code/1` で
-相互変換できます。同じ result contract のため、TCP-to-serial gateway の handler は
-downstream client の result をそのまま返せます。
-
-## サーバーの例
+`AVModbus.Memory` を使うと、メモリ上に Coil や Register を持つ Server を作れます。
 
 ```elixir
 {:ok, memory} = AVModbus.Memory.start_link()
-:ok = AVModbus.Memory.put(memory, :holding_register, 10, [18, 1000, 3])
+:ok = AVModbus.Memory.put(memory, :holding_register, 0, [123, 456])
 
 {:ok, server} =
   AVModbus.Server.start_link(
@@ -170,59 +107,25 @@ downstream client の result をそのまま返せます。
   )
 ```
 
-Modbus ASCII server は `transport: :ascii`、TCP server は transport option なし、または
-`transport: :tcp` で起動します。`rtu: true`、`ascii: true`、`tcp: true` も指定できます。
-transport-specific module を直接使う既存 API も維持しています。
+実機での UART 設定、build、flash は
+[XIAO ESP32-C5 実機チュートリアル](examples/hello_atomvm_modbus/README.md) を参照してください。
 
-Modbus TCP server は listener address、port、connection policy を指定できます。
+## ドキュメント
 
-```elixir
-{:ok, server} =
-  AVModbus.Server.start_link(
-    handler: {AVModbus.Memory, memory},
-    address: {0, 0, 0, 0},
-    port: 502,
-    connections: 16
-  )
-```
+### 初めて使う人向け
 
-RTU、ASCII、TCP server はいずれも standard child specification を持ちます。
-child options では `:handler` を指定し、supervisor が返す PID または `:name` を
-`status/1`、`port/1`、`stop/1` に渡せます。
+- [Modbus の基礎](docs/MODBUS_BASICS.md)
+- [Getting Started](docs/GETTING_STARTED.md)
+- [XIAO ESP32-C5 実機チュートリアル](examples/hello_atomvm_modbus/README.md)
 
-```elixir
-children = [
-  {AVModbus.Server,
-   [
-     handler: {AVModbus.Memory, memory},
-     address: {0, 0, 0, 0},
-     port: 502,
-     name: :modbus_server
-   ]}
-]
+### 開発・設計に関わる人向け
 
-Supervisor.start_link(children, strategy: :one_for_one)
-AVModbus.Server.status(:modbus_server)
-```
-
-## Startup error
-
-AVModbus の startup API は invalid configuration で raise せず、tagged error を返します。
-
-- option list でない値は `{:error, :invalid_options}`
-- unknown option は `{:error, {:invalid_option, option}}`
-- invalid handler は `{:error, :invalid_handler}`
-- invalid local name は `{:error, :invalid_name_option}`
-- option value の範囲違反は `{:error, :invalid_<name>_option}`
-
-validation は UART や TCP listener を開く前に完了します。これにより supervisor の start error と
-direct `start_link` の error は同じ形になります。
-
-## AtomVM サンプル
-
-実機向けの build / flash / UART 設定は次を参照してください。
-
-- [`examples/hello_atomvm_modbus/README.md`](examples/hello_atomvm_modbus/README.md)
+- [開発者ガイド](docs/DEVELOPMENT.md) — 高度な Client 設定、テスト、相互運用性
+- [アーキテクチャ](docs/ARCHITECTURE.md) — module の責務と設計
+- [ロードマップ](docs/ROADMAP.md) — 完了条件、検証状況、platform constraint
+- [Artifact size](docs/ARTIFACT_SIZE.md) / [Memory footprint](docs/MEMORY_FOOTPRINT.md)
+- [ADR](https://github.com/mnishiguchi/avmodbus/tree/main/docs/adr) — 長期的に残す設計判断
+- [Worklog](https://github.com/mnishiguchi/avmodbus/tree/main/docs/worklog) — 開発と実機検証の記録
 
 ## 開発
 
@@ -233,72 +136,17 @@ mix format --check-formatted
 mix test
 ```
 
-property tests は通常の test suite に含まれます。case 数または実行時間を増やす場合は
-次のように実行できます。
+property test、soak test、`pymodbus` / `libmodbus` との相互運用テストは
+[開発者ガイド](docs/DEVELOPMENT.md) にまとめています。
 
-Modbus Application Protocol V1.1b3 の public function example と malformed request / response
-vectors も通常の suite で client / server の両方向を検証します。
+## 対象 runtime
 
-```sh
-FUZZ_RUNS=10000 mix test test/avmodbus/property_test.exs
-FUZZ_SECONDS=600 mix test test/avmodbus/property_test.exs
-```
+- AtomVM compatibility target: `release-0.7`
+- 実機で使用した firmware: `v0.7.0-beta.0+git.8d3e051`
+- AVModbus 自体の runtime dependency: なし
 
-RTU / ASCII / TCP の managed client / server を継続運転する soak test は opt-in です。
-`SOAK_SECONDS` で実行時間、`SOAK_TRANSPORT` で `all` / `rtu` / `ascii` / `tcp`、
-`SOAK_INTERVAL_MS` で transaction 間隔（default: 5 ms）を指定できます。各 iteration は
-write と read-back の result を照合し、終了時に process count、process memory、liveness を検証します。
-soak module は ExUnit の既定 60 秒 timeout を使用せず、`SOAK_SECONDS` と各 request deadline で
-実行時間を制御します。
-
-```sh
-SOAK_SECONDS=600 mix test --include soak test/avmodbus/soak_test.exs
-SOAK_SECONDS=3600 SOAK_TRANSPORT=rtu mix test --include soak test/avmodbus/soak_test.exs
-SOAK_SECONDS=3600 SOAK_TRANSPORT=ascii mix test --include soak test/avmodbus/soak_test.exs
-SOAK_SECONDS=3600 SOAK_TRANSPORT=tcp mix test --include soak test/avmodbus/soak_test.exs
-```
-
-`SOAK_SECONDS` を設定しない通常の test suite では soak test を除外します。
-
-測定前に各 transport で 128 verified iteration を実行し、serial diagnostics の bounded event log などを
-steady state にします。完了 summary は assertion より先に出力するため、memory bound failure が起きても
-全 transport の iteration、process count、before / after memory を診断に利用できます。
-
-`pymodbus` との TCP / RTU / ASCII interoperability tests は独立した Python process を peer として使います。
-serial tests は test-only PTY bridge を使用し、OS package や library runtime dependency を追加しません。
-RTU / ASCII では通常の read / write に加え、diagnostics echo を双方向、pymodbus client から AVModbus
-server への diagnostic counter / event log、device identification、unit `0` broadcast write を検証します。
-専用 virtual environment を用意し、その Python を明示したときだけ実行されます。
-
-```sh
-python3 -m venv /tmp/avmodbus-pymodbus
-/tmp/avmodbus-pymodbus/bin/pip install pymodbus pyserial
-PYMODBUS_PYTHON=/tmp/avmodbus-pymodbus/bin/python mix test --include interop
-```
-
-`libmodbus` との双方向 TCP / RTU tests は C peer を test build directory に compile します。
-RTU tests は同じ test-only PTY bridge を使用します。
-header と library が `pkg-config` から見える場合だけ明示的に実行します。
-
-```sh
-LIBMODBUS_INTEROP=1 mix test --include libmodbus test/avmodbus/libmodbus_interop_test.exs
-```
-
-root package の `:atomvm` dependency は optional / `runtime: false` です。AtomVM release の supported API metadata を使った build-time validation のためだけに利用し、AVModbus の runtime dependency にはなりません。
-`StreamData` も property tests 専用で、firmware の runtime dependency には含まれません。
-
-## ドキュメント
-
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): 現在の設計と責務分離
-- [`docs/ROADMAP.md`](docs/ROADMAP.md): 完了条件、検証状況、platform constraint
-- [`docs/adr`](docs/adr/README.md): 長期的に残す設計判断
-- [`docs/worklog`](docs/worklog/README.md): 開発の主要マイルストーン
-
-## 参考資料
-
-- Modbus Application Protocol Specification V1.1b3
-- Modbus Serial Line Protocol and Implementation Guide V1.02
-- AtomVM UART documentation
+Modbus/TCP Security は、対象 AtomVM runtime に mutual TLS のための API が揃っていないため未対応です。
+TLS option は安全のため `{:error, :tls_not_supported}` を返し、暗号化なしへ自動的に切り替わることはありません。
 
 ## ライセンス
 

@@ -1,4 +1,6 @@
-# AtomVM artifact size budget
+# AtomVM artifact size の上限
+
+この資料は、release や機能追加の前に firmware size を確認する開発者向けです。
 
 AVModbus の AtomVM artifact regression は、pinned toolchain と既定 configuration で build した
 `examples/hello_atomvm_modbus/sample_app.avm` を基準にします。
@@ -6,9 +8,9 @@ AVModbus の AtomVM artifact regression は、pinned toolchain と既定 configu
 `MODBUS_RESOURCE_PROBE=true` の diagnostic build は
 この budget の対象外です。
 
-- baseline: 126,020 bytes
-- regression budget: 126,200 bytes
-- headroom: 180 bytes（約 0.1%）
+- 基準値: 126,020 bytes
+- 増加を検知する上限: 126,200 bytes
+- 余裕: 180 bytes（約 0.1%）
 - build SHA-256: `ee7c4f5fb6cacdd0595ac52fe13a19bf13bf28b04463e25fc61516ab540ff8ae`
 
 AtomVM で利用できない `Map.pop/2` を TCP client response / server eviction path から除去した結果、
@@ -31,5 +33,5 @@ AVMODBUS_AVM_BUDGET_BYTES=126200 \
 ```
 
 toolchain、compile-time configuration、example application の変更も artifact size に影響します。
-budget を更新する場合は、意図した増加であることを確認し、新しい baseline、budget、build hash を
+上限を更新する場合は、意図した増加であることを確認し、新しい基準値、上限、build hash を
 この文書と worklog に記録します。

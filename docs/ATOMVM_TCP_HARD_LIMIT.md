@@ -1,71 +1,63 @@
-# AtomVM ESP32-C5 TCP hard-limit report
+# AtomVM ESP32-C5 の TCP リソース上限レポート
 
-This document records a runtime blocker found while testing AVModbus resource
-exhaustion. It is written so that the observations can be transferred to an
-AtomVM issue without presenting the failure as an AVModbus error.
+この資料は、AVModbus のリソース不足テスト中に見つかった runtime 側の制約を記録します。
+AVModbus の不具合と断定せずに、観測結果を AtomVM の issue へ引き継げる内容にしています。
 
-## Summary
+## 概要
 
-On a Seeed Studio XIAO ESP32-C5, bounded Modbus/TCP pressure completes and
-recovers repeatedly. Increasing socket pressure beyond that known-good case
-does not return a recoverable socket resource error to Elixir. The observed
-failure is instead either a timer-manager timeout followed by application
-termination, or an ESP-IDF native abort.
+Seeed Studio XIAO ESP32-C5 では、上限を設けた Modbus TCP の負荷テストを繰り返し完了し、
+リソースが回復することを確認できました。一方、その確認済みの条件を超えて socket への負荷を
+増やすと、Elixir へ回復可能な socket resource error が返りません。観測した結果は、timer manager の
+timeout 後に application が終了するか、ESP-IDF の native abort が発生するかのいずれかでした。
 
-The hard-limit test therefore cannot yet establish AVModbus behavior for
-`:emfile`, `:enfile`, `:enobufs`, `:enomem`, or `:system_limit` on this target.
-For the current official runtime, this is recorded as a platform limitation:
-AVModbus cannot recover from an error that is never returned. The project
-acceptance boundary is the repeatedly recovered four-client device control plus
-the host-OS exhaustion tests, where the runtime does return `:emfile`. The
-roadmap item is resolved at that boundary and must be reassessed if an official
-AtomVM image changes the relevant runtime path.
+そのため、この実機では `:emfile`、`:enfile`、`:enobufs`、`:enomem`、`:system_limit` に対する
+AVModbus の挙動を hard-limit test で確認できていません。現在の公式 runtime については、これを
+platform constraint として記録します。runtime から error が返らない状態を AVModbus で回復することは
+できません。project の合格範囲は、4 Client の device control で繰り返し回復することと、runtime が
+`:emfile` を返す host OS 上のリソース不足テストまでとします。該当する runtime path が公式 AtomVM
+image で変更された場合は、この範囲を再評価します。
 
-## Environment
+## 検証環境
 
-- Board: Seeed Studio XIAO ESP32-C5
-- Runtime reported at boot: AtomVM `0.7.0-beta.0+git.8d3e051`
-- Firmware image:
+- board: Seeed Studio XIAO ESP32-C5
+- 起動時に表示された runtime: AtomVM `0.7.0-beta.0+git.8d3e051`
+- firmware image:
   `examples/hello_atomvm_modbus/firmware_images/AtomVM-esp32c5-elixir-v0.7.0-beta.0.img`
-- Firmware SHA-256:
+- firmware SHA-256:
   `2fcf4c8aa3c3df5c7a0c6a4be18fc437342baf6765e355ea75275ba7b89e38ad`
-- Transport: TCP loopback, `127.0.0.1`, using AtomVM's ESP32 socket driver
-- Application: the production example's compile-time resource probe
+- transport: AtomVM の ESP32 socket driver を使った TCP loopback `127.0.0.1`
+- application: production example の compile-time resource probe
 
-The nearby AtomVM source checkout used to inspect the socket event path was
-`cccd8fbcf32a333f5bb0d231a277c7511ce2499c`. It is not the exact firmware
-revision and must not be used to symbolize the address below.
+socket event path の調査に使った近隣の AtomVM source checkout は
+`cccd8fbcf32a333f5bb0d231a277c7511ce2499c` です。これは実際の firmware と同じ revision ではないため、
+後述する address の symbol 解決には使用できません。
 
-## `release-0.7` target audit
+## `release-0.7` target の確認
 
-AVModbus targets AtomVM's
-[`release-0.7`](https://github.com/atomvm/AtomVM/tree/release-0.7) branch. On
-2026-10-11 its head was `1f37255903c34909c06c83f866810ff9f9e43a8a` (commit
-date 2026-10-04). The installed beta.0 firmware commit
-`8d3e051bce9652ac1d9f52ef32b0a5f8b5fc0d65` is an ancestor of that head.
+AVModbus は AtomVM の
+[`release-0.7`](https://github.com/atomvm/AtomVM/tree/release-0.7) branch を対象にしています。
+2026-10-11 時点の head は `1f37255903c34909c06c83f866810ff9f9e43a8a`（commit date 2026-10-04）で、
+インストール済み beta.0 firmware の commit `8d3e051bce9652ac1d9f52ef32b0a5f8b5fc0d65` はその祖先です。
 
-There are four commits between them: version metadata and a MAP_EXT key-order
-fix. `socket_driver.c`, the ESP32 event-queue implementation, the timer manager,
-and scheduler timer code are unchanged. In particular, the installed firmware
-already contains the earlier ESP32 socket-lock fixes from `e1c74523` and
-`dc60886f`.
+両者の間にある 4 commit は、version metadata と MAP_EXT の key order 修正です。
+`socket_driver.c`、ESP32 event queue 実装、timer manager、scheduler の timer code に変更はありません。
+特に、インストール済み firmware には `e1c74523` と `dc60886f` の ESP32 socket lock 修正が
+すでに含まれています。
 
-The official
-[`v0.7.0-beta.0` release](https://github.com/atomvm/AtomVM/releases/tag/v0.7.0-beta.0)
-publishes ESP32-C5 images and checksums but no matching ELF, map, or debug-symbol
-asset. Reflashing the current branch head would therefore not exercise a newer
-socket path, while rebuilding is still required to obtain trustworthy symbols.
-The hard-limit blocker is current for the target branch until that path changes
-or a symbol-bearing reproduction identifies the native failure.
+公式の
+[`v0.7.0-beta.0` release](https://github.com/atomvm/AtomVM/releases/tag/v0.7.0-beta.0) は
+ESP32-C5 image と checksum を公開していますが、対応する ELF、map、debug symbol はありません。
+現在の branch head を書き込んでも新しい socket path は検証できず、信頼できる symbol を得るには
+build が必要です。この native failure を symbol 付きで再現して原因を特定するか、該当 path が
+変更されるまでは、この制約は対象 branch に残ります。
 
-Normal AVModbus device testing remains pinned to that official image. A locally
-built runtime is useful only for upstream native-crash diagnosis because it can
-retain a matching ELF and map; it is not interchangeable with the release
-artifact and is not acceptance evidence for this roadmap item.
+通常の AVModbus 実機テストでは、この公式 image を引き続き使います。local build の runtime は、
+対応する ELF と map を保持できるため upstream の native crash 調査には役立ちますが、release artifact
+とは同一ではなく、このロードマップ項目の合格証拠には使用しません。
 
-## Known-good control
+## 正常系の対照テスト
 
-The repository retains a bounded, repeatable probe. Build and flash it with:
+repository には、上限を設けた再現可能な probe を残しています。次の手順で build、flash します。
 
 ```sh
 cd examples/hello_atomvm_modbus
@@ -76,127 +68,112 @@ MODBUS_RESOURCE_PROBE=true MIX_ENV=prod \
 mix atomvm.esp32.monitor --port /dev/ttyACM0
 ```
 
-The default probe warms up the network stack, then runs three cycles with four
-managed clients. Each client has three accepted requests and one expected
-`:queue_full` result. Every cycle returned to four processes:
+既定の probe は network stack を warm-up してから、4 managed Client の cycle を 3 回実行します。
+各 Client は 3 request を受け付け、1 request は想定どおり `:queue_full` になります。
+すべての cycle で process 数は 4 に戻りました。
 
-| Cycle | Process count (before/peak/after) | Free heap in bytes (before/peak/after) |
+| cycle | process 数（前 / peak / 後） | free heap bytes（前 / peak / 後） |
 | --- | --- | --- |
 | 1 | `4 / 27 / 4` | `136088 / 116784 / 135532` |
 | 2 | `4 / 27 / 4` | `135368 / 116072 / 134808` |
 | 3 | `4 / 27 / 4` | `134652 / 116028 / 134772` |
 
-The largest free block remained at 86,016 bytes after warm-up, and the probe
-finished with `modbus_resource_probe result=ok cycles=3`.
+warm-up 後の最大 free block は 86,016 bytes を維持し、probe は
+`modbus_resource_probe result=ok cycles=3` で完了しました。
 
-This is the control case: AVModbus's bounded queue, request completion, process
-cleanup, and heap recovery all work under pressure.
+これが対照条件です。負荷がある状態でも、AVModbus の bounded queue、request 完了、process cleanup、
+heap recovery がすべて機能しています。
 
-The retained production probe fails closed before opening a socket when
-`MODBUS_RESOURCE_PROBE_CONNECTIONS` is outside `1..4`, or when the cycle count
-is not positive. This prevents an ordinary configuration change from crossing
-the known-safe boundary. Hard-limit experiments require a temporary diagnostic
-build so their risk is explicit.
+production 用に残した probe は、`MODBUS_RESOURCE_PROBE_CONNECTIONS` が `1..4` の範囲外、または
+cycle 数が正でない場合、socket を開く前に fail closed します。通常の設定変更で確認済みの安全範囲を
+超えないためです。hard-limit experiment には一時的な diagnostic build が必要であり、risk を
+明示できるようにしています。
 
-## Host OS exhaustion control
+## Host OS のリソース不足を使った対照テスト
 
-An opt-in Linux test runs AVModbus in a subprocess with a 64-descriptor soft
-limit and opens loopback listeners until the OS returns `:emfile`. It verifies
-both sides of the library contract:
+任意実行の Linux test は、file descriptor の soft limit を 64 にした subprocess で AVModbus を動かし、
+OS が `:emfile` を返すまで loopback listener を開きます。library contract の両側を確認します。
 
-- the managed TCP client exposes `{:disconnected, :emfile}`, reconnects after
-  descriptors are released, and completes a Modbus request;
-- TCP server startup returns `{:error, :emfile}`, then starts normally after
-  descriptors are released.
+- managed TCP Client は `{:disconnected, :emfile}` を公開し、descriptor 解放後に reconnect して
+  Modbus request を完了する
+- TCP Server の起動は `{:error, :emfile}` を返し、descriptor 解放後には正常に起動する
 
-Run the control with:
+次の command で実行します。
 
 ```sh
 RESOURCE_EXHAUSTION_TEST=true mix test \
   test/avmodbus/tcp_resource_exhaustion_test.exs
 ```
 
-This demonstrates AVModbus recovery when the runtime returns a resource error.
-It does not close the AtomVM item because the ESP32 runtime still aborts or
-loses timer-service responsiveness before returning an equivalent error.
+これは、runtime が resource error を返す場合に AVModbus が回復できることを示します。
+ただし、ESP32 runtime は同等の error を返す前に abort するか timer service の応答を失うため、
+AtomVM 実機の項目を解決する証拠にはなりません。
 
-## Hard-limit observations
+## リソース上限での観測結果
 
-Temporary diagnostic variants were used to raise socket pressure. They were
-removed after testing because they can leave the board's USB CDC console
-unresponsive until a physical USB power cycle.
+socket への負荷を増やすため、一時的な diagnostic variant を使用しました。board の USB CDC console が
+応答しなくなり、USB の電源を抜き差ししないと回復できない場合があるため、検証後に削除しています。
 
-### Concurrent managed-client startup
+### managed Client の同時起動
 
-Starting eight managed loopback clients concurrently did not return a socket
-resource error. A call to AtomVM's timer manager timed out after five seconds,
-then the application terminated.
+8 個の managed loopback Client を同時に起動しても socket resource error は返りませんでした。
+AtomVM timer manager の呼び出しが 5 秒後に timeout し、その後 application が終了しました。
 
-### Sequential socket pressure
+### socket へ順番に負荷を加えた場合
 
-Sequential managed-client creation also failed to produce a recoverable
-resource error and caused loss of the USB CDC console before a useful error
-could be captured.
+managed Client を順番に作成した場合も回復可能な resource error は得られず、有用な error を
+取得する前に USB CDC console が応答しなくなりました。
 
-A lower-level loopback socket variant reached an ESP-IDF `abort()` at program
-counter `0x4201fa15`. The installed firmware directory does not contain the
-matching symbol-bearing ELF, so that address cannot be resolved reliably.
+より低水準の loopback socket variant では、program counter `0x4201fa15` で ESP-IDF の `abort()` に
+到達しました。インストール済み firmware の directory に対応する symbol 付き ELF がないため、
+この address は信頼できる形で解決できません。
 
-In none of these runs did Elixir receive one of the expected hard-limit errors:
-`:emfile`, `:enfile`, `:enobufs`, `:enomem`, or `:system_limit`.
+どの実行でも、想定していた `:emfile`、`:enfile`、`:enobufs`、`:enomem`、`:system_limit` の
+hard-limit error を Elixir は受け取りませんでした。
 
-## Related socket event warning
+## 関連する socket event warning
 
-Closing several loopback sockets can print either of these messages:
+複数の loopback socket を閉じると、次のいずれかが表示されることがあります。
 
 ```text
 socket: failed to enqueue: ... to netconn_events.
 socket: failed to enqueue: ... to event_queue.
 ```
 
-Those strings are present in the installed firmware. In the inspected AtomVM
-source, the ESP32 socket callback uses a 32-entry `netconn_events` FreeRTOS
-queue and forwards notification through the platform's 16-entry `event_queue`.
-The warning is therefore consistent with bounded platform event-queue
-backpressure.
+これらの文字列はインストール済み firmware に含まれています。確認した AtomVM source では、
+ESP32 socket callback は 32 entry の `netconn_events` FreeRTOS queue を使い、platform の 16 entry の
+`event_queue` を介して通知します。そのため、この warning は上限のある platform event queue による
+backpressure と整合します。
 
-The warning also occurs in the known-good three-cycle probe, where process and
-heap recovery succeed. It should not by itself be treated as evidence of an
-AVModbus resource leak. The hard-limit abort and timer-manager failure are the
-unresolved behaviors.
+この warning は、process と heap が正常に回復する 3-cycle の対照テストでも発生します。
+warning だけを AVModbus の resource leak の証拠とは扱いません。未解決なのは hard-limit abort と
+timer manager failure です。
 
-## Expected behavior
+## 期待する動作
 
-Socket creation or connection should return a documented, recoverable error
-when the runtime or network stack reaches its resource limit. The scheduler,
-timer manager, existing processes, and console should remain responsive, so an
-application can release resources and continue or restart under supervision.
+runtime や network stack が resource 上限に達した場合、socket の作成や接続は文書化された回復可能な
+error を返す必要があります。scheduler、timer manager、既存 process、console は応答を維持し、
+application が resource を解放して処理を継続するか、supervision により再起動できる状態が必要です。
 
-## Safe reproduction requirements
+## 安全に再現するための条件
 
-- Use a spare or physically accessible board; the failure may require removing
-  and reconnecting USB power.
-- First run the retained four-client probe and confirm the known-good control.
-- Increase pressure only by changing the guard in a temporary diagnostic
-  build, not in the production example or on both boards at once.
-- Keep one board on the normal image so RS485 client/server recovery remains
-  available.
-- Capture the complete serial log and retain the exact symbol-bearing ELF for
-  the flashed AtomVM image.
-- Resolve `0x4201fa15` only against that matching ELF, then inspect the failing
-  native path before changing AVModbus behavior.
+- 予備の board、または物理的に操作できる board を使う。電源の抜き差しが必要になる可能性がある
+- 最初に、残してある 4 Client の probe を実行し、正常系の対照結果を確認する
+- production example や両方の board ではなく、一時的な diagnostic build の guard だけを変更して
+  負荷を増やす
+- 一方の board は通常 image のままにし、RS485 Client / Server の回復テストを続けられるようにする
+- serial log 全体を保存し、書き込んだ AtomVM image と正確に対応する symbol 付き ELF も保持する
+- `0x4201fa15` は対応する ELF だけで解決し、AVModbus の挙動を変更する前に失敗した native path を調べる
 
-## Re-evaluation trigger
+## 再評価する条件と手順
 
-1. Keep normal compatibility and bounded-resource tests on the official
-   `v0.7.0-beta.0` image.
-2. When an official image changes the relevant socket, event-queue, or timer
-   path, reopen this boundary and repeat the managed-client hard-limit run.
-3. If upstream crash diagnosis is pursued independently, build a one-off runtime
-   with a matching ELF/map, reproduce on one board, and symbolize the complete
-   ESP-IDF backtrace. Do not use that local image as roadmap acceptance evidence.
-4. Determine whether queue saturation, lwIP allocation failure, or timer
-   service starvation prevents the native layer from returning an error.
-5. Record the returned error and verify that AVModbus releases resources and
-   resumes requests without rebooting on an official image.
-
+1. 通常の互換性テストと bounded-resource test には公式 `v0.7.0-beta.0` image を使い続ける
+2. socket、event queue、timer の該当 path を変更した公式 image が公開されたら、この制約を再確認し、
+   managed Client の hard-limit test を再実行する
+3. upstream crash を独立して調査する場合は、対応する ELF / map を持つ一時的な runtime を build し、
+   1 台の board で再現して ESP-IDF backtrace 全体の symbol を解決する。その local image を
+   ロードマップの合格証拠には使用しない
+4. queue saturation、lwIP allocation failure、timer service starvation のどれが native layer からの
+   error 返却を妨げているかを特定する
+5. 返された error を記録し、公式 image 上で AVModbus が resource を解放して reboot なしに
+   request を再開できることを確認する

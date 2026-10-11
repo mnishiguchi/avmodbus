@@ -50,6 +50,9 @@ defmodule AVModbus.MixProject do
       extras:
         [
           {"README.md", [filename: "readme", title: "AVModbus"]},
+          {"docs/MODBUS_BASICS.md", [filename: "modbus-basics", title: "Modbus の基礎"]},
+          {"docs/GETTING_STARTED.md", [filename: "getting-started", title: "Getting Started"]},
+          {"docs/DEVELOPMENT.md", [filename: "development", title: "開発者ガイド"]},
           "CHANGELOG.md",
           "LICENSE",
           "docs/ARCHITECTURE.md",
