@@ -8,7 +8,7 @@
 
 - serial / TCP Client の `:timeout` option を既定 request deadline とする
 - 既定値は 1,000 ms とし、起動時は正の値だけを許可する
-- request 単位の positional / keyword timeout は起動時設定を上書きする
+- request 単位の `timeout:` は起動時設定を上書きする
 - deadline は API submission から数え、serial mailbox / TCP queue の待ち時間を含める
 - unmanaged UART API は従来の 1,000 ms を維持する
 - request 単位の 0 ms timeout は即時確認用として維持する

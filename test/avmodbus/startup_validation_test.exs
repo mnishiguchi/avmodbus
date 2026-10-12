@@ -29,7 +29,13 @@ defmodule AVModbus.StartupValidationTest do
     assert TCPServer.start_link(handler, :invalid) == {:error, :invalid_options}
     assert RTUServer.start_link(handler, :invalid) == {:error, :invalid_options}
     assert ASCIIServer.start_link(handler, :invalid) == {:error, :invalid_options}
+    assert Client.start_link(:uart) == {:error, :invalid_options}
+    assert Client.start_link(:transport, :uart) == {:error, :invalid_options}
     assert Client.start_link(:transport, :uart, :invalid) == {:error, :invalid_options}
+    assert Client.start_link() == {:error, :missing_transport_option}
+    assert Client.start_link([]) == {:error, :missing_transport_option}
+    assert Client.start_link(mode: :rtu) == {:error, :missing_transport_option}
+    assert Client.start_link(transport: :udp) == {:error, :invalid_transport_option}
 
     assert Memory.start_link(name: "invalid") == {:error, :invalid_name_option}
   end
@@ -39,10 +45,20 @@ defmodule AVModbus.StartupValidationTest do
 
     assert Client.start_link(tls: "127.0.0.1") == {:error, :tls_not_supported}
 
-    assert Client.start_link(tcp: "127.0.0.1", ssl: [verify: :verify_none]) ==
+    assert Client.start_link(transport: :tcp, host: "127.0.0.1", ssl: [verify: :verify_none]) ==
              {:error, :tls_not_supported}
 
     assert TCPServer.start_link(handler, ssl: []) == {:error, :tls_not_supported}
     assert TCPServer.start_supervised(handler: handler, tls: true) == {:error, :tls_not_supported}
+  end
+
+  test "built-in serial startup validates instance UART options before opening hardware" do
+    handler = fn _unit_id, _request -> :ok end
+
+    assert Client.start_link(transport: :rtu, serial: [speed: 0]) ==
+             {:error, {:invalid_serial_option, {:speed, 0}}}
+
+    assert RTUServer.start_link(handler, units: [1], serial: [direction_pin: 6]) ==
+             {:error, {:invalid_serial_option, {:direction_pin, 6}}}
   end
 end

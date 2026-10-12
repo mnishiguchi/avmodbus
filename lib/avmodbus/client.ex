@@ -2,15 +2,16 @@ defmodule AVModbus.Client do
   @moduledoc """
   serial bus または TCP connection を所有する managed Modbus client です。
 
-  通常の serial application では `start_link/0` で process が UART を所有し、
+  通常の serial application では `start_link/1` で process が UART を所有し、
   request を順番に処理します。low-level transaction API は host-side tests や
   UART ownership を application 側で管理する用途に利用できます。
 
-  serial client では unit `0` への write を broadcast として扱い、response は読みません。
-  configured turnaround delay の後に transaction を完了します。TCP の unit id は `0..255` を
-  routing identifier として扱います。
+  serial client では active transaction を 1 件に制限し、送信待ちは `:max_queue` で制限します。
+  queue saturation は `{:error, :queue_full}` を返します。unit `0` への write は broadcast として扱い、
+  response を読まず configured turnaround delay の後に transaction を完了します。
+  TCP の unit id は `0..255` を routing identifier として扱います。
 
-  `start_link(tcp: host)` では複数 request を transaction id で照合しながら並行送信する
+  `start_link(transport: :tcp, host: host)` では複数 request を transaction id で照合しながら並行送信する
   Modbus TCP client を起動します。wire 上の request は `:max_pending`、送信待ちは
   `:max_queue` で制限し、queue saturation は `{:error, :queue_full}` を返します。
 
@@ -18,13 +19,13 @@ defmodule AVModbus.Client do
   supervised child の raw PID、`:name` で登録した atom、`start_link` が返す tagged handle の
   いずれも全 managed client API で利用できます。
 
-  request function の最後の引数には従来の timeout millisecond、または `timeout:`、
-  `retries:`、`backoff:` の keyword options を指定できます。retry は明示的に指定した
+  request function の最後の引数には `timeout:`、`retries:`、`backoff:` の keyword options を
+  指定できます。retry は明示的に指定した
   idempotent read にだけ適用され、write は再送しません。
 
   managed client の `:timeout` option は request ごとの既定 deadline を指定します。
-  request 側の timeout を省略するとこの値を使い、明示した positional / keyword timeout は
-  client の既定値を上書きします。
+  request 側の timeout を省略するとこの値を使い、明示した `timeout:` は client の既定値を
+  上書きします。
 
   現在の AtomVM SSL API は Modbus/TCP Security が要求する mutual authentication を提供できないため、
   `tls:` または `ssl:` option は `{:error, :tls_not_supported}` を返します。
@@ -36,32 +37,25 @@ defmodule AVModbus.Client do
   @default_max_queue 64
   @default_echo Application.compile_env(:avmodbus, :modbus_echo, false)
   @default_turnaround Application.compile_env(:avmodbus, :modbus_broadcast_turnaround_ms, 100)
-  @default_speed Application.compile_env(:avmodbus, :uart_speed, 9_600)
-  @configured_gap_ms Application.compile_env(:avmodbus, :modbus_rtu_gap_ms, 0)
-  @calculated_gap_ms div(AVModbus.RTU.frame_gap_us(@default_speed) + 999, 1_000)
-  @default_gap_ms if(@configured_gap_ms == 0, do: @calculated_gap_ms, else: @configured_gap_ms)
-  @default_silence Application.compile_env(
-                     :avmodbus,
-                     :modbus_silence_ms,
-                     max(20, 2 * @calculated_gap_ms)
-                   )
   @default_backoff Application.compile_env(
                      :avmodbus,
                      :modbus_reconnect_backoff,
                      {100, 5_000}
                    )
+  @max_rtu_frame_size 256
   @behaviour :gen_server
 
   @type server :: pid() | atom()
-  @type t :: {__MODULE__, server()} | {__MODULE__, server(), :tcp}
+  @opaque t :: {__MODULE__, server()} | {__MODULE__, server(), :tcp}
   @type option ::
-          {:mode, :rtu | :ascii}
+          {:transport, :rtu | :ascii | :tcp}
+          | {:host, term()}
           | {:echo, boolean()}
           | {:turnaround, pos_integer()}
           | {:silence, pos_integer()}
           | {:gap, non_neg_integer()}
+          | {:serial, keyword()}
           | {:backoff, {pos_integer(), pos_integer()}}
-          | {:tcp, term()}
           | {:port, 1..65_535}
           | {:max_pending, 1..65_536}
           | {:max_queue, non_neg_integer() | :infinity}
@@ -74,6 +68,10 @@ defmodule AVModbus.Client do
           | {:retries, non_neg_integer()}
           | {:backoff, {pos_integer(), pos_integer()}}
   @type async_option :: {:timeout, non_neg_integer()} | {:to, pid()}
+  @type request_result :: :ok | {:ok, term()} | {:error, term()}
+  @type device_identification_category :: :basic | :regular | :extended
+  @type device_identification_option ::
+          retry_option() | {:category, device_identification_category()}
 
   @doc false
   def child_spec(options) when is_list(options) do
@@ -95,20 +93,22 @@ defmodule AVModbus.Client do
   def start_supervised(_options), do: {:error, :invalid_options}
 
   @doc """
-  configured UART を開き、serial transaction を直列化する process を起動します。
+  transport を指定しないため `{:error, :missing_transport_option}` を返します。
+
+  `start_link(transport: :rtu)`、`start_link(transport: :ascii)`、または
+  `start_link(transport: :tcp, host: host)` を使用してください。
   """
   @spec start_link() :: {:ok, t()} | {:error, term()}
-  def start_link do
-    start_link([])
-  end
+  def start_link, do: {:error, :missing_transport_option}
 
   @doc """
-  client option を使って configured UART を開くか、すでに open 済みの UART handle を所有します。
+  client option を使って configured UART を開き、その lifecycle を所有します。
 
-  主な option は `:mode` (`:rtu` / `:ascii`)、adapter echo を除去する `:echo`、
+  `:transport` は必須で、`:rtu`、`:ascii`、`:tcp` のいずれかを指定します。
+  TCP では `:host` も必須です。serial の主な option は adapter echo を除去する `:echo`、
   broadcast 後の `:turnaround`、送信前の `:gap`、unknown-length response を区切る
-  `:silence`、request の既定 deadline を指定する `:timeout`、UART reopen delay を指定する
-  `:backoff` (`{first, maximum}`) です。
+  `:silence`、instance UART 設定の `:serial`、待機 request 上限の `:max_queue`、request の既定
+  deadline を指定する `:timeout`、UART reopen delay を指定する `:backoff` (`{first, maximum}`) です。
   時間指定は millisecond 単位です。
   """
   @spec start_link([option()] | term()) :: {:ok, t()} | {:error, term()}
@@ -116,25 +116,30 @@ defmodule AVModbus.Client do
 
   def start_link(options) when is_list(options) do
     with :ok <- reject_tls(options),
-         {:ok, name} <- client_name(options) do
-      case find_option(options, :tcp) do
-        {:ok, host} ->
-          start_tcp_server(host, options, name)
+         {:ok, name} <- client_name(options),
+         {:ok, transport} <- required_transport(options) do
+      case transport do
+        :tcp ->
+          with {:ok, host} <- required_host(options) do
+            start_tcp_server(host, options, name)
+          end
 
-        :error ->
-          with {:ok, config} <- client_config(options) do
+        _serial_transport ->
+          with {:ok, config} <- client_config(options),
+               :ok <- UART.validate_options(config.serial) do
             start_server({:open, UART, config}, name)
           end
       end
     end
   end
 
-  def start_link(uart) do
-    start_link(uart, [])
-  end
+  def start_link(_options), do: {:error, :invalid_options}
 
   @doc """
   すでに open 済みの UART を使って managed client を起動します。
+
+  UART の ownership は呼び出し側に残り、client は停止時や transport failure 時に close / reopen
+  しません。library に lifecycle を管理させる場合は `start_link/1` の `serial:` option を使います。
   """
   @spec start_link(term(), [option()] | term()) :: {:ok, t()} | {:error, term()}
   def start_link(uart_or_transport, options_or_uart)
@@ -143,7 +148,7 @@ defmodule AVModbus.Client do
   def start_link(transport, options) when is_atom(transport) and is_list(options) do
     with :ok <- reject_tls(options),
          {:ok, name} <- client_name(options),
-         {:ok, config} <- client_config(options) do
+         {:ok, config} <- managed_client_config(options) do
       start_server({:open, transport, config}, name)
     end
   end
@@ -151,39 +156,33 @@ defmodule AVModbus.Client do
   def start_link(uart, options) when is_list(options) do
     with :ok <- reject_tls(options),
          {:ok, name} <- client_name(options),
-         {:ok, config} <- client_config(options) do
-      start_server({:ready, UART, uart, true, config}, name)
+         {:ok, config} <- managed_client_config(options) do
+      start_server({:ready, UART, uart, false, config}, name)
     end
   end
 
-  def start_link(transport, uart) when is_atom(transport) do
-    start_link(transport, uart, [])
-  end
+  def start_link(_uart_or_transport, _options_or_uart), do: {:error, :invalid_options}
 
   @doc false
   def start_link(transport, uart, options) when is_atom(transport) and is_list(options) do
     with :ok <- reject_tls(options),
          {:ok, name} <- client_name(options),
-         {:ok, config} <- client_config(options) do
+         {:ok, config} <- managed_client_config(options) do
       start_server({:ready, transport, uart, false, config}, name)
     end
   end
 
   def start_link(_transport, _uart, _options), do: {:error, :invalid_options}
 
-  @spec close(t() | term()) :: :ok | {:error, term()}
-  def close({__MODULE__, server}) when is_pid(server) or is_atom(server),
-    do: :gen_server.stop(server)
-
-  def close({__MODULE__, server, :tcp}) when is_pid(server) or is_atom(server),
-    do: :gen_server.stop(server)
-
-  def close(server) when is_pid(server) or is_atom(server), do: :gen_server.stop(server)
-  def close(uart), do: UART.close(uart)
-
   @doc "managed client を停止し、connection または所有する UART を閉じます。"
   @spec stop(t() | server()) :: :ok
-  def stop(client), do: close(client)
+  def stop({__MODULE__, server}) when is_pid(server) or is_atom(server),
+    do: :gen_server.stop(server)
+
+  def stop({__MODULE__, server, :tcp}) when is_pid(server) or is_atom(server),
+    do: :gen_server.stop(server)
+
+  def stop(server) when is_pid(server) or is_atom(server), do: :gen_server.stop(server)
 
   @doc "managed client の現在の connection state を返します。"
   @spec status(t() | server()) :: :connected | :connecting | {:disconnected, term()}
@@ -196,184 +195,295 @@ defmodule AVModbus.Client do
   def status(server) when is_pid(server) or is_atom(server),
     do: :gen_server.call(server, :status)
 
-  def open, do: UART.open()
-
-  def read_coils(uart, unit_id, address, quantity, timeout_ms \\ []) do
-    request(uart, unit_id, {:read_coils, address, quantity}, timeout_ms)
+  @doc "Coil を読み取ります。"
+  @spec read_coils(term(), 0..255, AVModbus.address(), pos_integer(), [retry_option()]) ::
+          request_result()
+  def read_coils(client, unit_id, address, quantity, options \\ []) do
+    request(client, unit_id, {:read_coils, address, quantity}, options)
   end
 
-  def read_discrete_inputs(uart, unit_id, address, quantity, timeout_ms \\ []) do
-    request(uart, unit_id, {:read_discrete_inputs, address, quantity}, timeout_ms)
+  @doc "Discrete Input を読み取ります。"
+  @spec read_discrete_inputs(
+          term(),
+          0..255,
+          AVModbus.address(),
+          pos_integer(),
+          [retry_option()]
+        ) :: request_result()
+  def read_discrete_inputs(client, unit_id, address, quantity, options \\ []) do
+    request(client, unit_id, {:read_discrete_inputs, address, quantity}, options)
   end
 
-  def read_holding_registers(uart, unit_id, address, quantity, timeout_ms \\ []) do
-    request(uart, unit_id, {:read_holding_registers, address, quantity}, timeout_ms)
+  @doc "Holding Register を読み取ります。"
+  @spec read_holding_registers(
+          term(),
+          0..255,
+          AVModbus.address(),
+          pos_integer(),
+          [retry_option()]
+        ) :: request_result()
+  def read_holding_registers(client, unit_id, address, quantity, options \\ []) do
+    request(client, unit_id, {:read_holding_registers, address, quantity}, options)
   end
 
-  def read_input_registers(uart, unit_id, address, quantity, timeout_ms \\ []) do
-    request(uart, unit_id, {:read_input_registers, address, quantity}, timeout_ms)
+  @doc "Input Register を読み取ります。"
+  @spec read_input_registers(
+          term(),
+          0..255,
+          AVModbus.address(),
+          pos_integer(),
+          [retry_option()]
+        ) :: request_result()
+  def read_input_registers(client, unit_id, address, quantity, options \\ []) do
+    request(client, unit_id, {:read_input_registers, address, quantity}, options)
   end
 
-  def write_single_coil(uart, unit_id, address, value, timeout_ms \\ []) do
-    request(uart, unit_id, {:write_single_coil, address, value}, timeout_ms)
+  @doc "1 個の Coil を書き込みます。"
+  @spec write_single_coil(
+          term(),
+          0..255,
+          AVModbus.address(),
+          boolean(),
+          [retry_option()]
+        ) :: request_result()
+  def write_single_coil(client, unit_id, address, value, options \\ []) do
+    request(client, unit_id, {:write_single_coil, address, value}, options)
   end
 
-  def write_single_register(uart, unit_id, address, value, timeout_ms \\ []) do
-    request(uart, unit_id, {:write_single_register, address, value}, timeout_ms)
+  @doc "1 個の Holding Register を書き込みます。"
+  @spec write_single_register(
+          term(),
+          0..255,
+          AVModbus.address(),
+          AVModbus.word(),
+          [retry_option()]
+        ) :: request_result()
+  def write_single_register(client, unit_id, address, value, options \\ []) do
+    request(client, unit_id, {:write_single_register, address, value}, options)
   end
 
-  def read_exception_status(uart, unit_id, timeout_ms \\ []) do
-    request(uart, unit_id, :read_exception_status, timeout_ms)
+  @doc "server の exception status を読み取ります。"
+  @spec read_exception_status(term(), 0..255, [retry_option()]) :: request_result()
+  def read_exception_status(client, unit_id, options \\ []) do
+    request(client, unit_id, :read_exception_status, options)
   end
 
-  def diagnostics(uart, unit_id, sub_function, data, timeout_ms \\ []) do
-    request(uart, unit_id, {:diagnostics, sub_function, data}, timeout_ms)
+  @doc "diagnostics sub-function を実行します。"
+  @spec diagnostics(term(), 0..255, AVModbus.word(), [AVModbus.word()], [retry_option()]) ::
+          request_result()
+  def diagnostics(client, unit_id, sub_function, data, options \\ []) do
+    request(client, unit_id, {:diagnostics, sub_function, data}, options)
   end
 
-  def get_comm_event_counter(uart, unit_id, timeout_ms \\ []) do
-    request(uart, unit_id, :get_comm_event_counter, timeout_ms)
+  @doc "communication event counter を読み取ります。"
+  @spec get_comm_event_counter(term(), 0..255, [retry_option()]) :: request_result()
+  def get_comm_event_counter(client, unit_id, options \\ []) do
+    request(client, unit_id, :get_comm_event_counter, options)
   end
 
-  def get_comm_event_log(uart, unit_id, timeout_ms \\ []) do
-    request(uart, unit_id, :get_comm_event_log, timeout_ms)
+  @doc "communication event log を読み取ります。"
+  @spec get_comm_event_log(term(), 0..255, [retry_option()]) :: request_result()
+  def get_comm_event_log(client, unit_id, options \\ []) do
+    request(client, unit_id, :get_comm_event_log, options)
   end
 
-  def write_multiple_coils(uart, unit_id, address, values, timeout_ms \\ []) do
-    request(uart, unit_id, {:write_multiple_coils, address, values}, timeout_ms)
+  @doc "複数の Coil を書き込みます。"
+  @spec write_multiple_coils(
+          term(),
+          0..255,
+          AVModbus.address(),
+          [boolean()],
+          [retry_option()]
+        ) :: request_result()
+  def write_multiple_coils(client, unit_id, address, values, options \\ []) do
+    request(client, unit_id, {:write_multiple_coils, address, values}, options)
   end
 
-  def write_multiple_registers(uart, unit_id, address, values, timeout_ms \\ []) do
-    request(uart, unit_id, {:write_multiple_registers, address, values}, timeout_ms)
+  @doc "複数の Holding Register を書き込みます。"
+  @spec write_multiple_registers(
+          term(),
+          0..255,
+          AVModbus.address(),
+          [AVModbus.word()],
+          [retry_option()]
+        ) :: request_result()
+  def write_multiple_registers(client, unit_id, address, values, options \\ []) do
+    request(client, unit_id, {:write_multiple_registers, address, values}, options)
   end
 
-  def report_server_id(uart, unit_id, timeout_ms \\ []) do
-    request(uart, unit_id, :report_server_id, timeout_ms)
+  @doc "server identification を読み取ります。"
+  @spec report_server_id(term(), 0..255, [retry_option()]) :: request_result()
+  def report_server_id(client, unit_id, options \\ []) do
+    request(client, unit_id, :report_server_id, options)
   end
 
+  @doc "mask を使って 1 個の Holding Register を変更します。"
+  @spec mask_write_register(
+          term(),
+          0..255,
+          AVModbus.address(),
+          AVModbus.word(),
+          AVModbus.word(),
+          [retry_option()]
+        ) :: request_result()
   def mask_write_register(
-        uart,
+        client,
         unit_id,
         address,
         and_mask,
         or_mask,
-        timeout_ms \\ []
+        options \\ []
       ) do
     request(
-      uart,
+      client,
       unit_id,
       {:mask_write_register, address, and_mask, or_mask},
-      timeout_ms
+      options
     )
   end
 
+  @doc "複数の Holding Register の書き込みと読み取りを 1 transaction で実行します。"
+  @spec read_write_multiple_registers(
+          term(),
+          0..255,
+          AVModbus.address(),
+          pos_integer(),
+          AVModbus.address(),
+          [AVModbus.word()],
+          [retry_option()]
+        ) :: request_result()
   def read_write_multiple_registers(
-        uart,
+        client,
         unit_id,
         read_address,
         read_quantity,
         write_address,
         write_values,
-        timeout_ms \\ []
+        options \\ []
       ) do
     request(
-      uart,
+      client,
       unit_id,
       {:read_write_multiple_registers, read_address, read_quantity, write_address, write_values},
-      timeout_ms
+      options
     )
   end
 
-  def read_fifo_queue(uart, unit_id, address, timeout_ms \\ []) do
-    request(uart, unit_id, {:read_fifo_queue, address}, timeout_ms)
+  @doc "FIFO queue を読み取ります。"
+  @spec read_fifo_queue(term(), 0..255, AVModbus.address(), [retry_option()]) ::
+          request_result()
+  def read_fifo_queue(client, unit_id, address, options \\ []) do
+    request(client, unit_id, {:read_fifo_queue, address}, options)
   end
 
-  def read_file_record(uart, unit_id, groups, timeout_ms \\ []) do
-    request(uart, unit_id, {:read_file_record, groups}, timeout_ms)
+  @doc "file record group を読み取ります。"
+  @spec read_file_record(term(), 0..255, [term()], [retry_option()]) :: request_result()
+  def read_file_record(client, unit_id, groups, options \\ []) do
+    request(client, unit_id, {:read_file_record, groups}, options)
   end
 
-  def write_file_record(uart, unit_id, groups, timeout_ms \\ []) do
-    request(uart, unit_id, {:write_file_record, groups}, timeout_ms)
+  @doc "file record group を書き込みます。"
+  @spec write_file_record(term(), 0..255, [term()], [retry_option()]) :: request_result()
+  def write_file_record(client, unit_id, groups, options \\ []) do
+    request(client, unit_id, {:write_file_record, groups}, options)
   end
 
+  @doc "任意の MEI type で Encapsulated Interface Transport を実行します。"
+  @spec encapsulated_interface_transport(
+          term(),
+          0..255,
+          byte(),
+          binary(),
+          [retry_option()]
+        ) :: request_result()
   def encapsulated_interface_transport(
-        uart,
+        client,
         unit_id,
         mei_type,
         data,
-        timeout_ms \\ []
+        options \\ []
       ) do
-    request(uart, unit_id, {:encapsulated_interface_transport, mei_type, data}, timeout_ms)
+    request(client, unit_id, {:encapsulated_interface_transport, mei_type, data}, options)
   end
 
-  def custom(uart, unit_id, function, data, timeout_ms \\ []) do
-    request(uart, unit_id, {:custom, function, data}, timeout_ms)
+  @doc "user-defined public Function Code の request を送ります。"
+  @spec custom(term(), 0..255, 1..127, binary(), [retry_option()]) :: request_result()
+  def custom(client, unit_id, function, data, options \\ []) do
+    request(client, unit_id, {:custom, function, data}, options)
   end
 
   @doc """
   指定 category の device identification を全 page 読み、object map として返します。
-  """
-  def read_device_identification(
-        uart,
-        unit_id,
-        category \\ :basic,
-        timeout_ms \\ []
-      )
 
-  def read_device_identification(uart, unit_id, category, timeout_ms)
-      when category in [:basic, :regular, :extended] do
-    read_device_identification_page(uart, unit_id, category, 0, timeout_ms, %{}, 0)
+  category は `:category` option で指定し、既定値は `:basic` です。request 共通の
+  `:timeout`、`:retries`、`:backoff` も指定できます。
+  """
+  @spec read_device_identification(term(), 0..255, [device_identification_option()]) ::
+          {:ok, map()} | {:error, term()}
+  def read_device_identification(client, unit_id, options \\ [])
+
+  def read_device_identification(client, unit_id, options) when is_list(options) do
+    category = option(options, :category, :basic)
+
+    if category in [:basic, :regular, :extended] do
+      request_options = remove_option(options, :category, [])
+      read_device_identification_page(client, unit_id, category, 0, request_options, %{}, 0)
+    else
+      {:error, :invalid_device_id_category}
+    end
   end
 
-  def read_device_identification(_uart, _unit_id, _category, _timeout_ms),
-    do: {:error, :invalid_device_id_category}
+  def read_device_identification(_client, _unit_id, _options), do: {:error, :invalid_options}
 
   @doc """
   request を送信し、result を待ちます。
 
-  最後の引数は timeout millisecond、または `timeout:`、`retries:`、`backoff:` の
-  keyword options です。`retries:` は既定で `0` です。正の retry 回数は idempotent read
+  最後の引数は `timeout:`、`retries:`、`backoff:` の keyword options です。
+  `retries:` は既定で `0` です。正の retry 回数は idempotent read
   にだけ許可し、`:timeout` と `:closed` の場合だけ再送します。
   """
-  @spec request(term(), 0..255, PDU.request(), non_neg_integer() | [retry_option()]) ::
+  @spec request(term(), 0..255, PDU.request(), [retry_option()]) ::
           {:ok, term()} | :ok | {:error, term()}
-  def request(uart_or_client, unit_id, request, timeout_ms \\ [])
+  def request(client, unit_id, request, options \\ [])
 
   def request(client, unit_id, request, options) when is_list(options) do
     with {:ok, config} <- request_config(options) do
       if config.retries > 0 do
         retry_request(client, unit_id, request, options)
       else
-        request(client, unit_id, request, config.timeout)
+        do_request(client, unit_id, request, config.timeout)
       end
     end
   end
 
-  def request(server, unit_id, request, timeout_ms) when is_pid(server) or is_atom(server) do
+  def request(_client, _unit_id, _request, _options), do: {:error, :invalid_options}
+
+  defp do_request(server, unit_id, request, timeout_ms) when is_pid(server) or is_atom(server) do
     case client_type(server) do
-      :tcp -> request({__MODULE__, server, :tcp}, unit_id, request, timeout_ms)
-      :serial -> request({__MODULE__, server}, unit_id, request, timeout_ms)
+      :tcp -> do_request({__MODULE__, server, :tcp}, unit_id, request, timeout_ms)
+      :serial -> do_request({__MODULE__, server}, unit_id, request, timeout_ms)
       {:error, _reason} = error -> error
     end
   end
 
-  def request({__MODULE__, server, :tcp}, unit_id, request, timeout_ms)
-      when (is_pid(server) or is_atom(server)) and is_integer(unit_id) and unit_id >= 0 and
-             unit_id <= 255 and
-             (timeout_ms == :default or (is_integer(timeout_ms) and timeout_ms >= 0)) do
+  defp do_request({__MODULE__, server, :tcp}, unit_id, request, timeout_ms)
+       when (is_pid(server) or is_atom(server)) and is_integer(unit_id) and unit_id >= 0 and
+              unit_id <= 255 and
+              (timeout_ms == :default or (is_integer(timeout_ms) and timeout_ms >= 0)) do
     managed_call(server, {:request, unit_id, request, request_timing(timeout_ms)})
   end
 
-  def request({__MODULE__, _pid, :tcp}, unit_id, _request, _timeout_ms)
-      when not is_integer(unit_id) or unit_id < 0 or unit_id > 255,
-      do: {:error, :invalid_unit_id}
+  defp do_request({__MODULE__, _pid, :tcp}, unit_id, _request, _timeout_ms)
+       when not is_integer(unit_id) or unit_id < 0 or unit_id > 255,
+       do: {:error, :invalid_unit_id}
 
-  def request({__MODULE__, _pid, :tcp}, _unit_id, _request, _timeout_ms),
+  defp do_request({__MODULE__, _pid, :tcp}, _unit_id, _request, _timeout_ms),
     do: {:error, :invalid_timeout}
 
-  def request({__MODULE__, server}, unit_id, request, timeout_ms)
-      when (is_pid(server) or is_atom(server)) and is_integer(unit_id) and unit_id >= 0 and
-             unit_id <= 247 and
-             (timeout_ms == :default or (is_integer(timeout_ms) and timeout_ms >= 0)) do
+  defp do_request({__MODULE__, server}, unit_id, request, timeout_ms)
+       when (is_pid(server) or is_atom(server)) and is_integer(unit_id) and unit_id >= 0 and
+              unit_id <= 247 and
+              (timeout_ms == :default or (is_integer(timeout_ms) and timeout_ms >= 0)) do
     case validate_unit_request(unit_id, request) do
       :ok ->
         managed_call(server, {:request, unit_id, request, request_timing(timeout_ms)})
@@ -383,18 +493,18 @@ defmodule AVModbus.Client do
     end
   end
 
-  def request({__MODULE__, _pid}, unit_id, _request, _timeout_ms)
-      when not is_integer(unit_id) or unit_id < 0 or unit_id > 247,
-      do: {:error, :invalid_unit_id}
+  defp do_request({__MODULE__, _pid}, unit_id, _request, _timeout_ms)
+       when not is_integer(unit_id) or unit_id < 0 or unit_id > 247,
+       do: {:error, :invalid_unit_id}
 
-  def request({__MODULE__, _pid}, _unit_id, _request, _timeout_ms),
+  defp do_request({__MODULE__, _pid}, _unit_id, _request, _timeout_ms),
     do: {:error, :invalid_timeout}
 
-  def request(uart, unit_id, request, :default) do
+  defp do_request(uart, unit_id, request, :default) do
     transaction(UART, uart, unit_id, request, @default_timeout)
   end
 
-  def request(uart, unit_id, request, timeout_ms) do
+  defp do_request(uart, unit_id, request, timeout_ms) do
     transaction(UART, uart, unit_id, request, timeout_ms)
   end
 
@@ -433,130 +543,119 @@ defmodule AVModbus.Client do
   def retry_request(_client, _unit_id, _request, _options), do: {:error, :invalid_options}
 
   @doc """
-  caller を block せず managed client に request を送ります。
+  transaction の完了を待たず managed client に request を送ります。
 
-  reference をすぐに返し、recipient は後で `{AVModbus.Client, reference, result}` を受信します。
-  `request/4` と同様に queue 待ち時間も timeout に含まれます。
+  request を受け付けた場合は reference を返し、recipient は後で
+  `{AVModbus.Client, reference, result}` を 1 回受信します。受付時点で client を利用できない場合や
+  queue が満杯の場合は reference を作らず `{:error, reason}` を返します。
+  `request/4` と同様に、受付までの時間と queue 待ち時間も timeout に含まれます。
 
-  第 4 引数には従来の timeout millisecond、または `timeout:` と `to:` の keyword options を
-  指定できます。第 5 引数の recipient も後方互換のため維持しています。
+  第 4 引数には `timeout:` と `to:` の keyword options を指定できます。
   """
   @spec send_request(
           t() | server(),
           0..255,
           PDU.request(),
-          non_neg_integer() | [async_option()],
-          pid()
+          [async_option()]
         ) ::
           reference() | {:error, term()}
-  def send_request(
-        client,
-        unit_id,
-        request,
-        timeout_ms \\ [],
-        recipient \\ self()
-      )
+  def send_request(client, unit_id, request, options \\ [])
 
-  def send_request(client, unit_id, request, options, default_recipient)
-      when is_list(options) do
-    recipient = option(options, :to, default_recipient)
+  def send_request(client, unit_id, request, options) when is_list(options) do
+    recipient = option(options, :to, self())
 
     with :ok <- validate_async_options(options),
          {:ok, timeout_ms} <- request_timeout_option(options),
          :ok <- validate_recipient(recipient) do
-      send_request(client, unit_id, request, timeout_ms, recipient)
+      do_send_request(client, unit_id, request, timeout_ms, recipient)
     end
   end
 
-  def send_request(server, unit_id, request, timeout_ms, recipient)
-      when is_pid(server) or is_atom(server) do
+  def send_request(_client, _unit_id, _request, _options), do: {:error, :invalid_options}
+
+  defp do_send_request(server, unit_id, request, timeout_ms, recipient)
+       when is_pid(server) or is_atom(server) do
     case client_type(server) do
-      :tcp -> send_request({__MODULE__, server, :tcp}, unit_id, request, timeout_ms, recipient)
-      :serial -> send_request({__MODULE__, server}, unit_id, request, timeout_ms, recipient)
+      :tcp -> do_send_request({__MODULE__, server, :tcp}, unit_id, request, timeout_ms, recipient)
+      :serial -> do_send_request({__MODULE__, server}, unit_id, request, timeout_ms, recipient)
       {:error, _reason} = error -> error
     end
   end
 
-  def send_request({__MODULE__, server, :tcp}, unit_id, request, timeout_ms, recipient)
-      when (is_pid(server) or is_atom(server)) and is_integer(unit_id) and unit_id >= 0 and
-             unit_id <= 255 and
-             (timeout_ms == :default or (is_integer(timeout_ms) and timeout_ms >= 0)) and
-             is_pid(recipient) do
+  defp do_send_request({__MODULE__, server, :tcp}, unit_id, request, timeout_ms, recipient)
+       when (is_pid(server) or is_atom(server)) and is_integer(unit_id) and unit_id >= 0 and
+              unit_id <= 255 and
+              (timeout_ms == :default or (is_integer(timeout_ms) and timeout_ms >= 0)) and
+              is_pid(recipient) do
     reference = make_ref()
 
-    :gen_server.cast(
-      server,
-      {:request, unit_id, request, request_timing(timeout_ms), recipient, reference}
-    )
-
-    reference
+    case managed_call(
+           server,
+           {:send_request, unit_id, request, request_timing(timeout_ms), recipient, reference}
+         ) do
+      :ok -> reference
+      {:error, _reason} = error -> error
+    end
   end
 
-  def send_request(
-        {__MODULE__, _pid, :tcp},
-        unit_id,
-        _request,
-        _timeout_ms,
-        _recipient
-      )
-      when not is_integer(unit_id) or unit_id < 0 or unit_id > 255,
-      do: {:error, :invalid_unit_id}
+  defp do_send_request(
+         {__MODULE__, _pid, :tcp},
+         unit_id,
+         _request,
+         _timeout_ms,
+         _recipient
+       )
+       when not is_integer(unit_id) or unit_id < 0 or unit_id > 255,
+       do: {:error, :invalid_unit_id}
 
-  def send_request({__MODULE__, _pid, :tcp}, _unit_id, _request, timeout_ms, _recipient)
-      when not is_integer(timeout_ms) or timeout_ms < 0,
-      do: {:error, :invalid_timeout}
+  defp do_send_request({__MODULE__, _pid, :tcp}, _unit_id, _request, timeout_ms, _recipient)
+       when not is_integer(timeout_ms) or timeout_ms < 0,
+       do: {:error, :invalid_timeout}
 
-  def send_request({__MODULE__, _pid, :tcp}, _unit_id, _request, _timeout_ms, _recipient),
+  defp do_send_request({__MODULE__, _pid, :tcp}, _unit_id, _request, _timeout_ms, _recipient),
     do: {:error, :invalid_recipient}
 
-  def send_request({__MODULE__, server}, unit_id, request, timeout_ms, recipient)
-      when (is_pid(server) or is_atom(server)) and is_integer(unit_id) and unit_id >= 0 and
-             unit_id <= 247 and
-             (timeout_ms == :default or (is_integer(timeout_ms) and timeout_ms >= 0)) and
-             is_pid(recipient) do
+  defp do_send_request({__MODULE__, server}, unit_id, request, timeout_ms, recipient)
+       when (is_pid(server) or is_atom(server)) and is_integer(unit_id) and unit_id >= 0 and
+              unit_id <= 247 and
+              (timeout_ms == :default or (is_integer(timeout_ms) and timeout_ms >= 0)) and
+              is_pid(recipient) do
     case validate_unit_request(unit_id, request) do
       :ok ->
         reference = make_ref()
         timing = request_timing(timeout_ms)
 
-        result_recipient =
-          request_recipient(timing, recipient, reference)
-
-        :gen_server.cast(
-          server,
-          {:request, unit_id, request, timing, result_recipient, reference}
-        )
-
-        reference
+        case managed_call(
+               server,
+               {:send_request, unit_id, request, timing, recipient, reference}
+             ) do
+          :ok -> reference
+          {:error, _reason} = error -> error
+        end
 
       error ->
         error
     end
   end
 
-  def send_request({__MODULE__, _pid}, unit_id, _request, _timeout_ms, _recipient)
-      when not is_integer(unit_id) or unit_id < 0 or unit_id > 247,
-      do: {:error, :invalid_unit_id}
+  defp do_send_request({__MODULE__, _pid}, unit_id, _request, _timeout_ms, _recipient)
+       when not is_integer(unit_id) or unit_id < 0 or unit_id > 247,
+       do: {:error, :invalid_unit_id}
 
-  def send_request({__MODULE__, _pid}, _unit_id, _request, timeout_ms, _recipient)
-      when not is_integer(timeout_ms) or timeout_ms < 0,
-      do: {:error, :invalid_timeout}
+  defp do_send_request({__MODULE__, _pid}, _unit_id, _request, timeout_ms, _recipient)
+       when not is_integer(timeout_ms) or timeout_ms < 0,
+       do: {:error, :invalid_timeout}
 
-  def send_request({__MODULE__, _pid}, _unit_id, _request, _timeout_ms, _recipient),
+  defp do_send_request({__MODULE__, _pid}, _unit_id, _request, _timeout_ms, _recipient),
     do: {:error, :invalid_recipient}
 
-  def send_request(_client, _unit_id, _request, _timeout_ms, _recipient),
+  defp do_send_request(_client, _unit_id, _request, _timeout_ms, _recipient),
     do: {:error, :invalid_client}
 
   defp request_timing(:default), do: {:default, monotonic_ms()}
 
   defp request_timing(timeout_ms),
     do: {:deadline, monotonic_ms() + timeout_ms, timeout_ms == 0}
-
-  defp request_recipient({:default, _submitted_ms}, recipient, _reference), do: recipient
-
-  defp request_recipient({:deadline, deadline_ms, allow_expired}, recipient, reference),
-    do: deadline_recipient(recipient, reference, deadline_ms, allow_expired)
 
   @doc false
   def resolve_request_timing({:default, submitted_ms}, timeout_ms),
@@ -599,56 +698,100 @@ defmodule AVModbus.Client do
 
   def handle_call(
         {:request, unit_id, request, timing},
-        _from,
-        %{status: :connected} = state
+        from,
+        state
       ) do
     {deadline_ms, allow_expired} = resolve_request_timing(timing, state.config.timeout)
-    {result, next} = execute_request(state, unit_id, request, deadline_ms, allow_expired)
-    {:reply, result, next}
+    entry = serial_entry(unit_id, request, deadline_ms, allow_expired, {:call, from})
+    {:noreply, submit_serial(state, entry)}
   end
 
-  def handle_call({:request, _unit_id, _request, _timing}, _from, state),
-    do: {:reply, {:error, :closed}, state}
-
-  def handle_call(_message, _from, state), do: {:reply, {:error, :unsupported_call}, state}
-
-  @impl true
-  def handle_cast(
-        {:request, unit_id, request, timing, recipient, reference},
+  def handle_call(
+        {:send_request, unit_id, request, timing, recipient, reference},
+        _from,
         state
       ) do
     {deadline_ms, allow_expired} = resolve_request_timing(timing, state.config.timeout)
 
-    recipient =
-      case timing do
-        {:default, _submitted_ms} ->
-          deadline_recipient(recipient, reference, deadline_ms, false)
+    case serial_capacity(state) do
+      {:ok, capacity} ->
+        result_recipient = deadline_recipient(recipient, reference, deadline_ms, allow_expired)
 
-        {:deadline, _deadline_ms, _allow_expired} ->
-          recipient
-      end
+        entry =
+          serial_entry(
+            unit_id,
+            request,
+            deadline_ms,
+            allow_expired,
+            {:send, result_recipient, reference}
+          )
 
-    {result, next} = execute_request(state, unit_id, request, deadline_ms, allow_expired)
-    send(recipient, {__MODULE__, reference, result})
-    {:noreply, next}
+        {:reply, :ok, commit_serial(state, entry, capacity)}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
+  def handle_call(_message, _from, state), do: {:reply, {:error, :unsupported_call}, state}
+
+  @impl true
   def handle_cast(_message, state), do: {:noreply, state}
 
   @impl true
   def handle_info(:reopen, %{status: {:disconnected, _reason}, reopen: true} = state),
     do: {:noreply, open_transport(state)}
 
+  def handle_info(
+        {:serial_result, worker, result},
+        %{active: %{worker: worker} = entry} = state
+      ) do
+    Process.demonitor(entry.monitor)
+    next = %{state | active: nil}
+
+    case result do
+      {:transport_error, reason} ->
+        serial_reply(entry, {:error, :closed})
+        {:noreply, next |> fail_serial_queue({:error, :closed}) |> drop_transport(reason)}
+
+      result ->
+        serial_reply(entry, result)
+        {:noreply, start_next_serial(next)}
+    end
+  end
+
+  def handle_info(
+        {:DOWN, monitor, :process, worker, reason},
+        %{active: %{worker: worker, monitor: monitor} = entry} = state
+      ) do
+    serial_reply(entry, {:error, :closed})
+
+    next =
+      state
+      |> Map.put(:active, nil)
+      |> fail_serial_queue({:error, :closed})
+      |> drop_transport({:transaction_worker_down, reason})
+
+    {:noreply, next}
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, %{transport: transport, uart: uart, close_on_stop: true})
-      when not is_nil(uart) do
-    _result = transport.close(uart)
+  def terminate(_reason, state) do
+    if state.active do
+      serial_reply(state.active, {:error, :closed})
+      Process.exit(state.active.worker, :kill)
+    end
+
+    _state = fail_serial_queue(state, {:error, :closed})
+
+    if state.close_on_stop and not is_nil(state.uart) do
+      _result = state.transport.close(state.uart)
+    end
+
     :ok
   end
-
-  def terminate(_reason, _state), do: :ok
 
   @doc false
   def transaction(transport, uart, unit_id, request, timeout_ms)
@@ -715,45 +858,129 @@ defmodule AVModbus.Client do
       reopen: reopen,
       config: config,
       status: if(is_nil(uart), do: :connecting, else: :connected),
+      active: nil,
+      queue: {[], []},
       backoff_min: backoff_min,
       backoff_max: backoff_max,
       reopen_delay: backoff_min
     }
   end
 
-  defp execute_request(
-         %{status: :connected} = state,
-         unit_id,
-         request,
-         deadline_ms,
-         allow_expired
-       ) do
-    result =
-      if deadline_ms >= monotonic_ms() or allow_expired do
-        transaction_until(
-          state.transport,
-          state.uart,
-          unit_id,
-          request,
-          deadline_ms,
-          state.config,
-          allow_expired
-        )
-      else
-        {:error, :timeout}
-      end
+  defp serial_entry(unit_id, request, deadline_ms, allow_expired, reply) do
+    %{
+      unit_id: unit_id,
+      request: request,
+      deadline_ms: deadline_ms,
+      allow_expired: allow_expired,
+      reply: reply
+    }
+  end
 
-    case result do
-      {:transport_error, reason} -> {{:error, :closed}, drop_transport(state, reason)}
-      _result -> {result, state}
+  defp submit_serial(state, entry) do
+    case serial_capacity(state) do
+      {:ok, capacity} ->
+        commit_serial(state, entry, capacity)
+
+      {:error, _reason} = error ->
+        serial_reply(entry, error)
+        state
     end
   end
 
-  defp execute_request(state, _unit_id, _request, _deadline_ms, _allow_expired),
-    do: {{:error, :closed}, state}
+  defp serial_capacity(%{status: status}) when status != :connected, do: {:error, :closed}
+  defp serial_capacity(%{active: nil}), do: {:ok, :active}
+
+  defp serial_capacity(state) do
+    if serial_queue_full?(state), do: {:error, :queue_full}, else: {:ok, :queue}
+  end
+
+  defp commit_serial(state, entry, :active), do: start_serial(state, entry)
+
+  defp commit_serial(state, entry, :queue),
+    do: %{state | queue: serial_queue_in(state.queue, entry)}
+
+  defp start_serial(state, entry) do
+    parent = self()
+
+    worker =
+      spawn(fn ->
+        result =
+          if entry.deadline_ms >= monotonic_ms() or entry.allow_expired do
+            transaction_until(
+              state.transport,
+              state.uart,
+              entry.unit_id,
+              entry.request,
+              entry.deadline_ms,
+              state.config,
+              entry.allow_expired
+            )
+          else
+            {:error, :timeout}
+          end
+
+        send(parent, {:serial_result, self(), result})
+      end)
+
+    monitor = Process.monitor(worker)
+    %{state | active: Map.merge(entry, %{worker: worker, monitor: monitor})}
+  end
+
+  defp start_next_serial(%{status: :connected} = state) do
+    case serial_queue_out(state.queue) do
+      {{:value, entry}, rest} -> start_serial(%{state | queue: rest}, entry)
+      :empty -> state
+    end
+  end
+
+  defp start_next_serial(state), do: state
+
+  defp serial_reply(%{reply: {:call, from}}, result), do: :gen_server.reply(from, result)
+
+  defp serial_reply(%{reply: {:send, recipient, reference}}, result),
+    do: send(recipient, {__MODULE__, reference, result})
+
+  defp fail_serial_queue(state, result) do
+    state.queue
+    |> serial_queue_to_list()
+    |> serial_reply_all(result)
+
+    %{state | queue: {[], []}}
+  end
+
+  defp serial_reply_all([], _result), do: :ok
+
+  defp serial_reply_all([entry | rest], result) do
+    serial_reply(entry, result)
+    serial_reply_all(rest, result)
+  end
+
+  defp serial_queue_full?(%{config: %{max_queue: :infinity}}), do: false
+
+  defp serial_queue_full?(state) do
+    {front, back} = state.queue
+    serial_list_length(front) + serial_list_length(back) >= state.config.max_queue
+  end
+
+  defp serial_queue_in({front, back}, entry), do: {front, [entry | back]}
+
+  defp serial_queue_out({[entry | rest], back}), do: {{:value, entry}, {rest, back}}
+  defp serial_queue_out({[], []}), do: :empty
+  defp serial_queue_out({[], back}), do: serial_queue_out({serial_reverse(back, []), []})
+
+  defp serial_queue_to_list({front, back}), do: serial_append(front, serial_reverse(back, []))
+  defp serial_append([], tail), do: tail
+  defp serial_append([value | rest], tail), do: [value | serial_append(rest, tail)]
+
+  defp serial_list_length(values), do: serial_list_length(values, 0)
+  defp serial_list_length([], result), do: result
+  defp serial_list_length([_value | rest], result), do: serial_list_length(rest, result + 1)
+
+  defp serial_reverse([], result), do: result
+  defp serial_reverse([value | rest], result), do: serial_reverse(rest, [value | result])
 
   defp open_transport(state) do
-    case state.transport.open() do
+    case Serial.open_transport(state.transport, state.config.serial) do
       {:ok, uart} ->
         %{state | uart: uart, status: :connected, reopen_delay: state.backoff_min}
 
@@ -1056,17 +1283,19 @@ defmodule AVModbus.Client do
             {:ok, data} when is_binary(data) and data != <<>> ->
               {remaining_echo, response_data} = Serial.strip_echo(expected_echo, data)
 
-              read_response(
-                transport,
-                uart,
-                unit_id,
-                request,
-                deadline_ms,
-                remaining_echo,
-                silence_ms,
-                <<buffer::binary, response_data::binary>>,
-                true
-              )
+              with {:ok, next_buffer} <- append_rtu_response(buffer, response_data) do
+                read_response(
+                  transport,
+                  uart,
+                  unit_id,
+                  request,
+                  deadline_ms,
+                  remaining_echo,
+                  silence_ms,
+                  next_buffer,
+                  true
+                )
+              end
 
             {:ok, <<>>} ->
               {:error, :timeout}
@@ -1090,17 +1319,19 @@ defmodule AVModbus.Client do
             {:ok, data} when is_binary(data) and data != <<>> ->
               {remaining_echo, response_data} = Serial.strip_echo(expected_echo, data)
 
-              read_response(
-                transport,
-                uart,
-                unit_id,
-                request,
-                deadline_ms,
-                remaining_echo,
-                silence_ms,
-                <<buffer::binary, response_data::binary>>,
-                true
-              )
+              with {:ok, next_buffer} <- append_rtu_response(buffer, response_data) do
+                read_response(
+                  transport,
+                  uart,
+                  unit_id,
+                  request,
+                  deadline_ms,
+                  remaining_echo,
+                  silence_ms,
+                  next_buffer,
+                  true
+                )
+              end
 
             {:ok, <<>>} ->
               RTU.complete_silence_response(buffer, unit_id, request)
@@ -1115,8 +1346,17 @@ defmodule AVModbus.Client do
               {:transport_error, {:transport_read, other}}
           end
         end
+
+      :overflow ->
+        {:error, :frame_too_long}
     end
   end
+
+  defp append_rtu_response(buffer, data)
+       when byte_size(buffer) + byte_size(data) <= @max_rtu_frame_size,
+       do: {:ok, <<buffer::binary, data::binary>>}
+
+  defp append_rtu_response(_buffer, _data), do: {:error, :frame_too_long}
 
   defp remaining_timeout(deadline_ms, has_read) do
     remaining_ms = deadline_ms - monotonic_ms()
@@ -1130,27 +1370,33 @@ defmodule AVModbus.Client do
 
   defp client_config(options) do
     with :ok <- validate_options(options),
-         mode = option(options, :mode, :rtu),
+         mode = option(options, :transport, :rtu),
+         :ok <- validate_serial_transport(mode),
+         serial = option(options, :serial, []),
+         {:ok, defaults} <- Serial.Config.defaults(mode, serial),
          echo = option(options, :echo, @default_echo),
          turnaround = option(options, :turnaround, @default_turnaround),
-         silence = option(options, :silence, @default_silence),
-         gap = option(options, :gap, default_gap(mode)),
+         silence = option(options, :silence, defaults.silence),
+         gap = option(options, :gap, defaults.gap),
+         max_queue = option(options, :max_queue, @default_max_queue),
          timeout = option(options, :timeout, @default_timeout),
          backoff = option(options, :backoff, @default_backoff),
-         :ok <- validate_mode(mode),
          :ok <- validate_echo(echo),
          :ok <- validate_turnaround(turnaround),
          :ok <- validate_silence(silence),
          :ok <- validate_gap(gap),
+         :ok <- validate_max_queue(max_queue),
          :ok <- validate_default_timeout(timeout),
          :ok <- validate_backoff(backoff) do
       {:ok,
        %{
          mode: mode,
+         serial: serial,
          echo: echo,
          turnaround: turnaround,
          silence: silence,
          gap: gap,
+         max_queue: max_queue,
          timeout: timeout,
          backoff: backoff
        }}
@@ -1192,7 +1438,8 @@ defmodule AVModbus.Client do
 
   defp validate_tcp_options([{key, _value} | rest])
        when key in [
-              :tcp,
+              :transport,
+              :host,
               :port,
               :max_pending,
               :max_queue,
@@ -1260,6 +1507,31 @@ defmodule AVModbus.Client do
     end
   end
 
+  defp required_transport(options) do
+    case find_option(options, :transport) do
+      {:ok, transport} when transport in [:rtu, :ascii, :tcp] -> {:ok, transport}
+      {:ok, _transport} -> {:error, :invalid_transport_option}
+      :error -> {:error, :missing_transport_option}
+    end
+  end
+
+  defp required_host(options) do
+    case find_option(options, :host) do
+      {:ok, host} -> {:ok, host}
+      :error -> {:error, :missing_host_option}
+    end
+  end
+
+  defp managed_client_config(options) do
+    with {:ok, transport} <- required_transport(options),
+         :ok <- require_serial_transport(transport) do
+      client_config(options)
+    end
+  end
+
+  defp require_serial_transport(transport) when transport in [:rtu, :ascii], do: :ok
+  defp require_serial_transport(_transport), do: {:error, :invalid_transport_option}
+
   defp reject_tls([]), do: :ok
 
   defp reject_tls([{key, _value} | _rest]) when key in [:tls, :ssl],
@@ -1284,7 +1556,7 @@ defmodule AVModbus.Client do
          backoff_ms,
          maximum_backoff_ms
        ) do
-    case request(client, unit_id, request, timeout_ms) do
+    case do_request(client, unit_id, request, timeout_ms) do
       {:error, reason} when reason in [:timeout, :closed] and retries > 0 ->
         Process.sleep(backoff_ms)
 
@@ -1400,7 +1672,18 @@ defmodule AVModbus.Client do
   defp validate_options([]), do: :ok
 
   defp validate_options([{key, _value} | rest])
-       when key in [:mode, :echo, :turnaround, :silence, :gap, :timeout, :backoff, :name],
+       when key in [
+              :transport,
+              :echo,
+              :turnaround,
+              :silence,
+              :gap,
+              :serial,
+              :max_queue,
+              :timeout,
+              :backoff,
+              :name
+            ],
        do: validate_options(rest)
 
   defp validate_options([option | _rest]), do: {:error, {:invalid_option, option}}
@@ -1408,6 +1691,14 @@ defmodule AVModbus.Client do
   defp option([], _key, default), do: default
   defp option([{key, value} | _rest], key, _default), do: value
   defp option([_option | rest], key, default), do: option(rest, key, default)
+
+  defp remove_option([], _key, reversed), do: :lists.reverse(reversed)
+
+  defp remove_option([{key, _value} | rest], key, reversed),
+    do: remove_option(rest, key, reversed)
+
+  defp remove_option([option | rest], key, reversed),
+    do: remove_option(rest, key, [option | reversed])
 
   defp find_option([], _key), do: :error
   defp find_option([{key, value} | _rest], key), do: {:ok, value}
@@ -1431,51 +1722,48 @@ defmodule AVModbus.Client do
 
   defp validate_backoff(_value), do: {:error, :invalid_backoff_option}
 
-  defp validate_mode(value) when value in [:rtu, :ascii], do: :ok
-  defp validate_mode(_value), do: {:error, :invalid_mode_option}
-
-  defp default_gap(:ascii), do: 0
-  defp default_gap(_mode), do: @default_gap_ms
+  defp validate_serial_transport(value) when value in [:rtu, :ascii], do: :ok
+  defp validate_serial_transport(_value), do: {:error, :invalid_transport_option}
 
   defp encode_frame(:rtu, unit_id, pdu), do: RTU.encode(unit_id, pdu)
   defp encode_frame(:ascii, unit_id, pdu), do: ASCII.encode(unit_id, pdu)
 
   defp read_device_identification_page(
-         _uart,
+         _client,
          _unit_id,
          _category,
          _object_id,
-         _timeout_ms,
+         _options,
          _objects,
          256
        ),
        do: {:error, :malformed_response}
 
   defp read_device_identification_page(
-         uart,
+         client,
          unit_id,
          category,
          object_id,
-         timeout_ms,
+         options,
          objects,
          requests
        ) do
     case request(
-           uart,
+           client,
            unit_id,
            {:read_device_identification, category, object_id},
-           timeout_ms
+           options
          ) do
       {:ok, answer} ->
         merged = put_device_id_objects(answer.objects, objects)
 
         if answer.more_follows and answer.next_object_id > object_id do
           read_device_identification_page(
-            uart,
+            client,
             unit_id,
             category,
             answer.next_object_id,
-            timeout_ms,
+            options,
             merged,
             requests + 1
           )

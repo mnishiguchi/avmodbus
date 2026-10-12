@@ -2,16 +2,17 @@
 
 ## 背景
 
-RTU / ASCII / TCP Server の tagged handle は direct startup には便利だが、Supervisor の child result と一致しない。
+RTU / ASCII / TCP Server の独自 handle は Supervisor の child result と一致せず、transport ごとに
+戻り値を変える必要もない。
 
 ## 決定
 
 - 各 managed Server は standard child specification を提供する
-- supervision 用 start function は tagged handle から raw PID を返す
+- facade と transport-specific `start_link` はどちらも `{:ok, pid}` を返す
 - `:name` は local atom registration とする
-- lifecycle API は tagged handle、raw PID、name を受け付ける
-- direct `start_link` の tagged result は後方互換のため維持する
+- lifecycle API は raw PID または registered name を受け付ける
+- server の停止 API は `stop/1` に統一する
 
 ## 影響
 
-すべての transport を同じ方法で supervision tree に組み込める。
+direct startup と supervision tree で同じ process identity を扱える。

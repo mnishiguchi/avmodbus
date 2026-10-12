@@ -8,14 +8,14 @@ AVModbus の AtomVM artifact regression は、pinned toolchain と既定 configu
 `MODBUS_RESOURCE_PROBE=true` の diagnostic build は
 この budget の対象外です。
 
-- 基準値: 126,020 bytes
-- 増加を検知する上限: 126,200 bytes
-- 余裕: 180 bytes（約 0.1%）
-- build SHA-256: `ee7c4f5fb6cacdd0595ac52fe13a19bf13bf28b04463e25fc61516ab540ff8ae`
+- 基準値: 139,660 bytes
+- 増加を検知する上限: 139,860 bytes
+- 余裕: 200 bytes（約 0.1%）
+- build SHA-256: `caf14c2fedee928f86721ee3084d2aa00ee22c1b8eeb592f9a1e60b9e1eaf41c`
 
-AtomVM で利用できない `Map.pop/2` を TCP client response / server eviction path から除去した結果、
-baseline は 140 bytes 増加しました。実機で TCP response path を確認した上で、同じ 180-byte
-headroom を維持するよう budget を更新しています。
+UART broker の terminal error precedence を追加した結果、直前の 139,600-byte baseline から 60 bytes
+増加しました。AtomVM compatibility check、host test、実 RS485 workflow を確認し、増分に従来と同じ
+headroom を加えて budget を更新しています。
 
 次の command は production artifact を再 build し、budget を超えた場合に失敗します。
 
@@ -28,7 +28,7 @@ artifact path と budget は、個別検証用に環境変数で上書きでき�
 
 ```sh
 AVMODBUS_AVM_PATH=/tmp/sample_app.avm \
-AVMODBUS_AVM_BUDGET_BYTES=126200 \
+AVMODBUS_AVM_BUDGET_BYTES=139860 \
 ../../scripts/check_avm_size.sh
 ```
 

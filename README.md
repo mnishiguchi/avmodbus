@@ -55,6 +55,7 @@ Unit ID、Coil、Holding Register、Function Code などの用語を短時間で
 - Coil、Discrete Input、Input Register、Holding Register の種類に応じた読み取り / 書き込み
 - diagnostics、file record、FIFO、device identification などの標準 Function Code
 - timeout、読み取り request の retry、UART / TCP の再接続
+- instance ごとの UART 設定と交換可能な Serial Transport
 - supervision tree からの Client / Server 起動
 - broadcast と RS485 adapter echo の処理
 - `pymodbus` / `libmodbus` との相互運用テスト
@@ -67,7 +68,7 @@ Unit ID、Coil、Holding Register、Function Code などの用語を短時間で
 UART の pin などを application configuration に設定してから Client を起動します。
 
 ```elixir
-{:ok, client} = AVModbus.Client.start_link(mode: :rtu, timeout: 1_000)
+{:ok, client} = AVModbus.Client.start_link(transport: :rtu, timeout: 1_000)
 
 {:ok, registers} =
   AVModbus.Client.read_holding_registers(client, 1, 0, 2)
@@ -83,7 +84,8 @@ Modbus TCP の場合は UART の代わりに接続先を指定します。
 ```elixir
 {:ok, client} =
   AVModbus.Client.start_link(
-    tcp: "192.168.1.20",
+    transport: :tcp,
+    host: "192.168.1.20",
     port: 502,
     timeout: 1_000
   )

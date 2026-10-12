@@ -77,4 +77,13 @@ defmodule AVModbus.RTUTest do
 
     assert RTU.complete_silence_response(frame, 4, request) == {:error, :frame_too_short}
   end
+
+  test "bounds an unknown-length response at the maximum RTU frame size" do
+    request = {:custom, 100, <<1>>}
+    maximum = <<3, 100, :binary.copy(<<0>>, 254)::binary>>
+
+    assert byte_size(maximum) == 256
+    assert RTU.split_response(maximum, 3, request) == :unknown
+    assert RTU.split_response(maximum <> <<0>>, 3, request) == :overflow
+  end
 end

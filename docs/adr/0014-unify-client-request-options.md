@@ -2,17 +2,20 @@
 
 ## 背景
 
-timeout や async recipient を positional argument だけで増やすと、API arity と移行負担が増える。
+timeout や async recipient を positional argument で増やすと、API arity と call site の意味が
+分かりにくくなる。
 
 ## 決定
 
-- request の最後の引数は従来の timeout integer と keyword options の両方を受け付ける
+- request の最後の引数は keyword options だけを受け付ける
 - sync option は `timeout:`、`retries:`、`backoff:`
+- device identification helper の category は `category:` とし、既定値は `:basic`
 - retry の既定値は 0 とし、正の値は ADR 0012 の安全性検証を通す
 - async option は `timeout:` と `to:`
-- positional form と `retry_request/4` は維持する
+- timeout integer と async recipient の positional form は提供しない
+- retry policy を明示する `retry_request/4` は維持する
 - invalid option は送信前に tagged error で返す
 
 ## 影響
 
-後方互換を保ちながら request 単位の option を拡張できる。
+request option の追加で arity を増やさず、call site だけで timeout、category、recipient の意味を判別できる。

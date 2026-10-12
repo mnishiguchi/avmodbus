@@ -5,32 +5,43 @@
 
 ## Client の管理範囲
 
-`AVModbus.Client` は UART または TCP connection を所有し、通信状態を管理します。
+`AVModbus.Client.start_link/1` で起動した Client は UART または TCP connection を所有し、通信状態を管理します。
+open 済み transport handle を渡す injected mode では ownership は呼び出し側に残り、Client は停止時や
+transport failure 時にその handle を close / reopen しません。
 
 - serial bus 上の request を順番に処理
+- serial / TCP の送信待ち queue を `max_queue` で制限
 - request ごとの timeout と全体の deadline を管理
 - UART close 後の reopen / backoff
 - TCP reconnect と transaction ID による response 照合
-- TCP の同時送信数と送信待ち queue を制限
+- TCP の同時送信数を `max_pending` で制限
 
 ### 非同期 request
 
-caller を停止させず request を送れます。
+transaction の完了を待たず request を送れます。Client が request を受け付けると reference を返し、
+完了時に同じ reference を含む message を 1 回送ります。queue が満杯、または Client を利用できない場合は
+reference の代わりに `{:error, reason}` をその場で返します。
 
 ```elixir
-ref =
-  AVModbus.Client.send_request(
-    client,
-    1,
-    {:read_holding_registers, 0, 2},
-    timeout: 500,
-    to: self()
-  )
+case AVModbus.Client.send_request(
+       client,
+       1,
+       {:read_holding_registers, 0, 2},
+       timeout: 500,
+       to: self()
+     ) do
+  ref when is_reference(ref) ->
+    receive do
+      {AVModbus.Client, ^ref, result} -> result
+    end
 
-receive do
-  {AVModbus.Client, ^ref, result} -> result
+  {:error, reason} ->
+    {:error, reason}
 end
 ```
+
+受付は短い synchronous call ですが、wire response は待ちません。これにより producer が一方的に
+Client mailbox と deadline helper を増やすことを防ぎ、`max_queue` を backpressure 境界として使えます。
 
 ### timeout と retry
 
@@ -51,12 +62,16 @@ AVModbus.Client.read_holding_registers(
 retry は明示した読み取り request にだけ適用されます。write、diagnostics、custom request は、
 同じ操作の重複を避けるため正の `retries:` を受け付けません。Modbus exception や不正な response も retry しません。
 
-### TCP の接続と queue
+### Serial / TCP の queue
+
+Serial Client は active transaction を 1 件に制限し、残りを `max_queue` まで待機させます。
+TCP Client は次のように、wire 上の request 数も `max_pending` で制限します。
 
 ```elixir
 {:ok, client} =
   AVModbus.Client.start_link(
-    tcp: "192.168.1.20",
+    transport: :tcp,
+    host: "192.168.1.20",
     port: 502,
     timeout: 1_000,
     max_pending: 4,
@@ -76,12 +91,35 @@ Client は standard child specification を持ちます。
 ```elixir
 children = [
   {AVModbus.Client,
-   [tcp: "192.168.1.20", port: 502, name: :plc_client]}
+   [
+     transport: :tcp,
+     host: "192.168.1.20",
+     port: 502,
+     name: :plc_client
+   ]}
 ]
 
 Supervisor.start_link(children, strategy: :one_for_one)
 AVModbus.Client.read_holding_registers(:plc_client, 1, 0, 2)
 ```
+
+### Serial transport と instance 設定
+
+`AVModbus.Serial.Transport` は serial adapter の `open` / `read` / `write` / `close` contract を定義します。
+既定の `AVModbus.UART` は `serial:` で UART 設定を instance ごとに受け取ります。
+
+```elixir
+{:ok, client} =
+  AVModbus.Client.start_link(
+    transport: :rtu,
+    serial: [peripheral: "UART2", speed: 38_400, tx: 4, rx: 5]
+  )
+```
+
+custom adapter は `@behaviour AVModbus.Serial.Transport` を指定し、instance 設定を受け取る
+`open/1` を実装します。設定を使わない adapter も空 list を受け付けてください。
+manual DE / RE adapter では、UART の送信完了待ちと受信方向への切り替えを終えてから
+`write/2` を返してください。Client / Server は GPIO direction を直接操作しません。
 
 ## 戻り値の形式
 
@@ -95,7 +133,10 @@ Client と Server handler は同じ形式を使います。
 | request と一致しない response | `{:error, {:invalid_response, pdu}}` |
 | timeout | `{:error, :timeout}` |
 | connection を利用できない | `{:error, :closed}` |
-| TCP 送信待ち queue が満杯 | `{:error, :queue_full}` |
+| Serial / TCP の送信待ち queue が満杯 | `{:error, :queue_full}` |
+
+Serial の Unit ID は `0..247` です。`0` は write broadcast にだけ利用でき、個別 Server は
+`1..247` を使います。TCP の Unit Identifier は gateway routing を含む `0..255` として扱います。
 
 `AVModbus.exception_name/1` と `AVModbus.exception_code/1` で exception 名と wire code を変換できます。
 
@@ -162,6 +203,12 @@ mix test
 ```
 
 Modbus Application Protocol V1.1b3 の function example、境界値、不正 frame、property test を含みます。
+coverage gate は production module を対象に 80% 以上とし、test 専用の Duplex / PTY transport は
+集計から除外します。
+
+```sh
+mix test --cover
+```
 
 ### Property test を長く実行する
 

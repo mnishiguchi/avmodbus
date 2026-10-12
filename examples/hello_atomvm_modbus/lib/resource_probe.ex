@@ -97,7 +97,7 @@ if Application.compile_env(:sample_app, :resource_probe, false) do
     defp run_with_clients(cycle, before, check_heap, server, clients) do
       result =
         with :ok <- await_connected(clients, 200),
-             expected = submit_requests(clients, 1, []),
+             {:ok, expected} <- submit_requests(clients, 1, []),
              peak = snapshot(),
              :ok <- collect_results(expected, @request_timeout_ms + 1_000) do
           {:ok, peak}
@@ -144,7 +144,7 @@ if Application.compile_env(:sample_app, :resource_probe, false) do
 
     defp start_clients(port, remaining, clients) do
       case Client.start_link(
-             tcp: {127, 0, 0, 1},
+             transport: :tcp, host: {127, 0, 0, 1},
              port: port,
              max_pending: 1,
              max_queue: @requests_per_client - 2,
@@ -167,30 +167,35 @@ if Application.compile_env(:sample_app, :resource_probe, false) do
       end
     end
 
-    defp submit_requests([], _client_index, expected), do: expected
+    defp submit_requests([], _client_index, expected), do: {:ok, expected}
 
     defp submit_requests([client | clients], client_index, expected) do
-      expected = submit_client_requests(client, client_index, 0, expected)
-      submit_requests(clients, client_index + 1, expected)
+      with {:ok, next} <- submit_client_requests(client, client_index, 0, expected) do
+        submit_requests(clients, client_index + 1, next)
+      end
     end
 
     defp submit_client_requests(_client, _client_index, @requests_per_client, expected),
-      do: expected
+      do: {:ok, expected}
 
     defp submit_client_requests(client, client_index, request_index, expected) do
       address = client_index * 100 + request_index
 
-      reference =
-        Client.send_request(client, client_index, {:read_holding_registers, address, 1})
+      case Client.send_request(client, client_index, {:read_holding_registers, address, 1}) do
+        reference when is_reference(reference) and request_index < 3 ->
+          submit_client_requests(
+            client,
+            client_index,
+            request_index + 1,
+            [{reference, {:ok, [address]}} | expected]
+          )
 
-      result = if request_index < 3, do: {:ok, [address]}, else: {:error, :queue_full}
+        {:error, :queue_full} when request_index == 3 ->
+          submit_client_requests(client, client_index, request_index + 1, expected)
 
-      submit_client_requests(
-        client,
-        client_index,
-        request_index + 1,
-        [{reference, result} | expected]
-      )
+        other ->
+          {:error, {:unexpected_submission, client_index, request_index, other}}
+      end
     end
 
     defp collect_results([], _timeout_ms), do: :ok

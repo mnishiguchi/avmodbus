@@ -18,15 +18,37 @@ AVModbus は、Modbus protocol の実装と AtomVM / UART / board 固有処理�
 
 ## UART 設定の境界
 
-既定の `AVModbus.UART` adapter は peripheral、TX / RX pin、baud、data bits、parity、stop bits を
-firmware build 時の application configuration から取得します。これらは board wiring と deployment
-profile の一部であり、managed client / server の protocol option には重複して持たせません。
+`AVModbus.Serial.Transport` は `open` / `read` / `write` / `close` の contract を定義し、protocol core と
+UART / custom hardware を分離します。既定の `AVModbus.UART` adapter は peripheral、TX / RX pin、baud、
+data bits、parity、stop bits を firmware build 時の application configuration から取得します。
+transport の `open/1` は常に instance 設定の keyword list を受け取ります。
+Client / Server の `serial:` option で instance ごとに上書きでき、同じ firmware から複数 bus を異なる
+設定で起動できます。RTU の既定 frame gap と低 baud で必要な receive silence も、その instance の
+`speed` から計算します。
 
-runtime に UART を選択・open する必要がある application は、AtomVM `:uart` で handle を用意し、
+AtomVM の `uart:read/2` は、次の read を開始するまでに届いた byte を保持しない場合があります。
+既定 adapter は専用 reader で UART を継続して読み、隣接 chunk を UART 固有の RX idle timeout まで
+drain してから 2,048-byte 上限の broker へ渡します。これは `modbus_silence_ms` とは独立した
+`uart_rx_idle_timeout_ms`（instance option は `rx_idle_timeout:`）で、RTU / ASCII の frame boundary は
+上位の codec が判断します。AtomVM 0.7 / ESP32-C5 の実機では即時転送時に長い request の byte 欠落を
+再現したため、既定 20 ms を維持します。別の UART driver や高 baud rate で短縮する場合は実機で
+fragmentation と連続 request を検証します。
+
+Client / Server の read timeout は broker 上の待機だけを取り消し、UART の継続受信は止めません。
+broker は reader を監視し、buffer overflow、UART error、reader の終了を transport failure として返します。
+transport failure は terminal state です。broker は残っていた buffer を破棄し、失敗後に届く data を無視して、
+待機中および以後の read へ最初の error を返します。read timeout と failure が競合して local timeout が先に
+確定した場合も、次の read では記録済みの terminal error を返します。managed lifecycle は失敗した handle を
+close / reopen します。
+
+application が UART handle を直接管理する injected mode では、AtomVM `:uart` で handle を用意し、
 `AVModbus.Client` または serial server の transport / handle startup entrypoint に inject できます。
-この場合の close / reopen policy は application 側の責務です。実機要件から
-managed reopen を保った runtime override が必要になった場合は、transport configuration として
-設計し、client / server に個別の UART option を重複実装しません。
+Client / Server はその handle を close / reopen せず、owner process と recovery policy は application 側の
+責務です。通常の managed mode では Client / Server process が `open/1` を呼び、同じ process の終了、
+transport failure、再接続と UART lifecycle を一貫して管理します。
+
+manual DE / RE を使う adapter は、送信完了待ちと direction 切り替えを `write/2` 内で行います。
+Client / Server は GPIO を直接操作せず、将来 native RS485 mode が利用可能になっても同じ contract を保ちます。
 
 ## レイヤー
 
@@ -65,6 +87,8 @@ AVModbus.Client                              AVModbus.Server
 RTU / ASCII / TCP の framing や UART / socket access は持ちません。これにより、protocol behavior を hardware なしでテストできます。
 
 `AVModbus.RTU` は unit id、CRC16、frame boundary、noise recovery、silent interval で完了する frame を扱います。
+request と response の frame accumulation は最大 256 bytes に制限し、unknown-length response も超過時に
+`:frame_too_long` として停止します。raw UART broker の 2,048-byte 上限とは別の protocol invariant です。
 
 `AVModbus.ASCII` は hexadecimal framing、LRC、delimiter、stream resynchronization を扱います。
 
@@ -79,9 +103,13 @@ connection lifecycle は、AVModbus が接続状態を管理する TCP Client / 
 
 - synchronous / asynchronous request で同じ deadline model を使用
 - queue 待ち時間も timeout に含める
+- transaction worker は常に 1 process とし、待機 request は既定 64 件の `:max_queue` で制限
+- async request は短い synchronous admission で受け付け、saturation は `:queue_full` を即時返却
+- deadline arbiter は受付済みの active / queued request にだけ作成し、process 数も queue 境界内に保つ
+- transport failure は active / queued request を一度ずつ `:closed` で完了
 - RTU では送信前に、19,200 baud 以下なら 3.5 character、より高速なら 1.75 ms の gap を確保
-- built-in profile では `:modbus_rtu_gap_ms` が `0` の場合に baud rate から gap を算出し、
-  automatic-direction hardware が追加 margin を必要とする deployment では正の compile-time 値で上書き
+- built-in profile では baud rate から gap を算出し、`:modbus_rtu_gap_ms` はその下限として適用
+- automatic-direction hardware が追加 margin を必要とする場合は、計算値より大きい compile-time 下限を設定
 - unit `0` の write を broadcast として扱い、response は読まない
 - adapter echo を必要に応じて除去
 - UART open / read / write failure 後は bounded exponential backoff で reopen
@@ -94,7 +122,8 @@ TCP client は AtomVM / OTP 共通の active binary `:gen_tcp` socket を所有�
 - IPv4 / IPv6 literal を正規化し、address family に一致する socket を選択
 - transaction id ごとに response を request と照合
 - `:max_pending` まで request を並行送信し、残りは deadline を保ったまま queue
-- 未送信 queue は default 64 件の `:max_queue` で制限し、saturation は `:queue_full` で通知
+- 未送信 queue は default 64 件の `:max_queue` で制限し、async admission でも saturation は
+  `:queue_full` を即時返却
 - fragmented / concatenated frame と out-of-order response を処理
 - unit id の一致を既定で検証し、gateway compatibility 用に無効化可能
 - invalid MBAP stream、peer half-close / reset、socket failure、二回連続の silent timeout 後に connection を再確立
@@ -103,29 +132,33 @@ TCP client は AtomVM / OTP 共通の active binary `:gen_tcp` socket を所有�
 
 managed client は standard child specification と local `:name` registration を提供します。
 supervisor が返す raw PID、registered name、従来の tagged handle は同じ public API で利用できます。
-tagged handle は serial / TCP policy を caller 側で即座に識別し、raw PID / name は client process に
+tagged handle は opaque 型で、serial / TCP policy を library が即座に識別します。raw PID / name は client process に
 transport kind を問い合わせて同じ validation path に委譲します。
 
-request helper は従来の positional timeout と、`timeout:` / `retries:` / `backoff:` の keyword
-options を同じ path に正規化します。managed client startup の `:timeout` は request ごとの
-既定 deadline で、省略された timeout だけに適用し、serial mailbox / TCP queue の待ち時間も
-deadline に含めます。unmanaged UART transaction は従来どおり 1,000 ms を fallback にします。
+request helper は `timeout:` / `retries:` / `backoff:` の keyword options を受け付けます。
+device identification helper の category も `category:` で指定し、既定値は `:basic` です。
+managed client startup の `:timeout` は request ごとの既定 deadline で、省略された timeout
+だけに適用し、serial mailbox / TCP queue の待ち時間も deadline に含めます。unmanaged UART
+transaction は 1,000 ms を fallback にします。
 0 ms timeout は、non-broadcast request かつ transmit gap が 0 の場合だけ一度の即時 attempt を許可し、
 待機は行いません。
 retry の既定値は 0 で、`retry_request/4` も明示的な generic
 entrypoint として維持します。対象は protocol semantics が read-only と判定できる request だけで、
 `:timeout` / `:closed` のみを bounded exponential backoff で再試行します。write、diagnostics、
 custom request、Modbus exception、invalid response は retry せず、ambiguous write completion を
-replay しません。async request は positional recipient に加えて `timeout:` / `to:` を受け付けます。
+replay しません。async request は `timeout:` / `to:` を受け付けます。
 
 RTU、ASCII、TCP の managed server も同じ supervision contract を提供します。child options の
-`:handler` を既存の `start_link(handler, options)` に委譲し、supervisor には raw PID を返します。
-server の lifecycle / status API は raw PID、registered local name、従来の tagged handle を受け付けます。
+`:handler` を既存の `start_link(handler, options)` に委譲します。facade と transport-specific module の
+どちらも `{:ok, pid}` を返し、server の lifecycle / status API は raw PID または registered local name を
+受け付けます。
 
-`AVModbus.Server` は統一 startup facade でもあります。transport 未指定時は TCP、
-`transport: :rtu | :ascii | :tcp` または対応する boolean marker で明示選択し、option を
-transport-specific module に委譲します。facade は standard `{:ok, pid}` を返し、既存 module の
-tagged-handle API は後方互換のため維持します。
+`AVModbus.Client` と `AVModbus.Server` の startup facade は、どちらも
+`transport: :rtu | :ascii | :tcp` を必須とします。TCP Client は接続先を `host:` で指定します。
+transport を暗黙に選ばないため、設定漏れは UART や listener を確保する前に
+`{:error, :missing_transport_option}` となります。Server facade は option を transport-specific module に
+委譲して standard `{:ok, pid}` を返します。transport-specific module は custom transport injection にも
+利用できますが、戻り値の形式は facade と同じです。
 
 client、server、memory の startup validation は process / UART / listener の確保前に実行し、
 configuration error を `{:error, reason}` で返します。unknown option は offending option を保持し、
@@ -204,7 +237,7 @@ TCP server は listener と connection admission を managed process で所有�
 
 ## AtomVM との境界
 
-`AVModbus.UART` は AtomVM `:uart` を包む薄い adapter です。
+`AVModbus.UART` は AtomVM `:uart` を包み、連続受信と bounded buffering を提供する adapter です。
 
 GPIO、baud rate、parity、board pinout、firmware install、polling loop は library の責務ではありません。これらは application または `examples/hello_atomvm_modbus` 側で設定します。
 

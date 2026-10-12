@@ -9,7 +9,7 @@ defmodule AVModbus.TCPServerTest do
       TCPServer.start_link(handler, [port: 0, address: {127, 0, 0, 1}] ++ options)
 
     on_exit(fn ->
-      pid = elem(server, 1)
+      pid = server
       stop_server(server, pid)
     end)
 
@@ -45,15 +45,17 @@ defmodule AVModbus.TCPServerTest do
   test "serves the memory model through the managed TCP client" do
     {:ok, memory} = Memory.start_link(holding_registers: 20)
     server = start_server({Memory, memory})
-    {:ok, client} = Client.start_link(tcp: "127.0.0.1", port: TCPServer.port(server))
+
+    {:ok, client} =
+      Client.start_link(transport: :tcp, host: "127.0.0.1", port: TCPServer.port(server))
 
     on_exit(fn ->
-      if Process.alive?(elem(client, 1)), do: Client.close(client)
+      if Process.alive?(elem(client, 1)), do: Client.stop(client)
       if Process.alive?(memory), do: :gen_server.stop(memory)
     end)
 
-    assert Client.write_multiple_registers(client, 255, 3, [42, 258], 500) == :ok
-    assert Client.read_holding_registers(client, 255, 3, 2, 500) == {:ok, [42, 258]}
+    assert Client.write_multiple_registers(client, 255, 3, [42, 258], timeout: 500) == :ok
+    assert Client.read_holding_registers(client, 255, 3, 2, timeout: 500) == {:ok, [42, 258]}
   end
 
   test "reassembles fragments and answers concatenated requests in order" do
@@ -119,7 +121,7 @@ defmodule AVModbus.TCPServerTest do
     {:ok, server} = TCPServer.start_link(handler, port: 0, address: address)
 
     on_exit(fn ->
-      pid = elem(server, 1)
+      pid = server
       if Process.alive?(pid), do: TCPServer.stop(server)
     end)
 
@@ -205,18 +207,20 @@ defmodule AVModbus.TCPServerTest do
         identification: identification
       )
 
-    {:ok, client} = Client.start_link(tcp: {127, 0, 0, 1}, port: TCPServer.port(server))
-    on_exit(fn -> if Process.alive?(elem(client, 1)), do: Client.close(client) end)
+    {:ok, client} =
+      Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, port: TCPServer.port(server))
 
-    assert Client.read_coils(client, 1, 0, 1, 500) ==
+    on_exit(fn -> if Process.alive?(elem(client, 1)), do: Client.stop(client) end)
+
+    assert Client.read_coils(client, 1, 0, 1, timeout: 500) ==
              {:error, {:exception, :server_device_failure}}
 
-    assert Client.read_coils(client, 1, 1, 1, 500) == {:ok, [true]}
+    assert Client.read_coils(client, 1, 1, 1, timeout: 500) == {:ok, [true]}
 
-    assert Client.write_single_register(client, 1, 0, 1, 500) ==
+    assert Client.write_single_register(client, 1, 0, 1, timeout: 500) ==
              {:error, {:exception, :illegal_function}}
 
-    assert Client.read_device_identification(client, 1, :basic, 500) ==
+    assert Client.read_device_identification(client, 1, timeout: 500) ==
              {:ok, identification}
   end
 
@@ -237,7 +241,7 @@ defmodule AVModbus.TCPServerTest do
     assert TCPServer.start_link(handler, allow: [{{10, 0, 0, 0}, 40}]) ==
              {:error, :invalid_allow_option}
 
-    :ok = TCPServer.close(server)
+    :ok = TCPServer.stop(server)
     assert :gen_tcp.recv(socket, 0, 1_000) == {:error, :closed}
   end
 
@@ -254,7 +258,7 @@ defmodule AVModbus.TCPServerTest do
   end
 
   defp stop_server(server, pid) do
-    if Process.alive?(pid), do: TCPServer.close(server)
+    if Process.alive?(pid), do: TCPServer.stop(server)
   catch
     :exit, _reason -> :ok
   end

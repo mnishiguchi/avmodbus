@@ -59,6 +59,14 @@
 | 2026-10-11 | 通常の実機 compatibility test を公式 `v0.7.0-beta.0` image に固定し、source build を matching symbol が必要な upstream crash diagnostic に限定 |
 | 2026-10-11 | 利用可能な hardware に合わせ、USB-RS485 adapter / commercial device を completion criteria から外し、real bus は 2 台の XIAO / HW-519、independent peer は pymodbus / libmodbus で検証する scope に確定 |
 | 2026-10-11 | resource exhaustion item を、host の real `:emfile` recovery、AtomVM の bounded device recovery、現行公式 runtime の hard-limit failure という supported boundary で解決。runtime path 更新時の再評価条件を記録 |
+| 2026-10-12 | AtomVM UART の read 間で発生する byte loss を専用 reader と bounded broker で解消し、実 RS485 の ASCII 7E1 / RTU workflow で確認 |
+| 2026-10-12 | Serial Transport contract、instance ごとの UART 設定と speed-based RTU timing、256-byte RTU response 上限を追加 |
+| 2026-10-13 | UART RX idle drain を Modbus silence から分離。即時転送と 3 ms では実機で byte 欠落、20 ms では RTU 3 cycle / 60 request 完走を確認し、reader failure propagation と broker host tests を追加 |
+| 2026-10-13 | Serial Client を non-blocking coordinator + single transaction worker に変更し、既定 64 件の bounded queue、`:queue_full`、failure drain を追加 |
+| 2026-10-13 | Serial / TCP の async request を synchronous admission に変更し、queue overflow を直接返却。deadline arbiter を受付済み request に限定し、mailbox / helper process の backpressure を強化 |
+| 2026-10-13 | async admission 後の production artifact は 139,600 bytes。AtomVM compatibility check を通過し、139,800-byte budget へ更新 |
+| 2026-10-13 | 更新した TCP resource probe を ESP32-C5 で 3 cycle 実行。process は各 cycle `4 -> 57 -> 4` に回復し、`result=ok`。続けて RTU workflow 3 cycle / 60 request も成功し Client board を workflow image に復元 |
+| 2026-10-13 | official AtomVM `v0.7.0-beta.0` tag が実機 revision と同じ `8d3e051` であることを確認。codec 最適化は bottleneck の実測がないため見送り、runtime 更新・実測時の release gate として整理 |
 
 ## 現在の検証状況
 
@@ -185,3 +193,67 @@
   間の 4 commit は version metadata と MAP_EXT key order の修正だけで、ESP32 socket driver、event queue、
   timer manager、scheduler timer path は同一。beta.0 release asset は ESP32-C5 image / checksum のみで
   ELF / map を含まないため、symbol 付き source build なしに abort PC を確実に解決できないことを確認
+- 実 RS485 の ASCII 7E1 workflow で 32-byte UART chunk をまたぐ Function `0x17` request の tail が
+  欠落することを再現。serial server が partial frame を即時に読み進めるよう修正し、さらに専用 reader が
+  `uart:read/2` を継続する bounded UART broker を追加。ASCII は 20 ms gap で 3 cycle / 60 request を
+  2 回連続完走し、最小 response-to-next-write 36 ms、broadcast turnaround 130 ms。RTU も同条件で
+  3 cycle / 60 request を完走し、最小 gap 37 ms、turnaround 129 ms
+- UART broker / reader 追加後の startup free heap delta は RTU client 22,976 bytes（process 3 → 7）、
+  RTU server 32,408 bytes（process 3 → 8）。default production `sample_app.avm` は 129,064 bytes、
+  SHA-256 は `57dfcbbaeb3183f716213ec4e9f1e6d8c8189d2f7030a9ef74fa17b2ec27d41f`。budget を
+  129,250 bytes に更新し、186 bytes の headroom を維持
+- Serial Transport / instance UART config / bounded RTU feed 追加後の default production
+  `sample_app.avm` は 134,676 bytes、SHA-256 は
+  `6db4a70bb7f32ccb850c56d22d445486e418a43e058fc4f3044bff6873851056`。budget を
+  134,860 bytes に更新し、184 bytes の headroom を維持
+- 同実装の startup free heap delta は RTU client 25,704 bytes（process 3 → 7、client 824 bytes）、
+  RTU server 35,200 bytes（process 3 → 8、memory 560 bytes、server 1,204 bytes）。instance `serial:`
+  configuration を使う実機 RTU / ASCII workflow はそれぞれ 3 cycle / 60 request を完走。RTU は最小 gap
+  37 ms / broadcast 129 ms、ASCII 7E1 は最小 gap 36 ms / broadcast 131 ms
+- 同変更後の pymodbus TCP / RTU / ASCII 双方向 interoperability suite は 209 tests / 6 properties、
+  failure 0。両 XIAO は最終的に通常の RTU server / client image へ復元し、連続 read を確認
+- Client / Server startup を必須の `transport:` option に統一し、TCP Client の接続先を `host:` に分離。
+  Server の facade / transport-specific startup はすべて raw PID を返し、managed lifecycle は `stop/1` に統一。
+  host suite 195 tests / 6 properties と pymodbus suite 209 tests / 6 properties、AtomVM compatibility check が
+  failure 0。新 API で build した Client を実機へ書き込み、既存 Server から 3 回連続 read を確認。
+  raw PID API へ更新した Server も実機へ書き込み、同じ Client から連続 read を確認。
+  default production `sample_app.avm` は 133,600 bytes、SHA-256 は
+  `9cee9eeaa12776ce788c514149cd2e331b7dbeb8860b4b38e5f4855f934e344c`
+- Client request API を keyword options に統一し、positional timeout と async recipient を削除。
+  host suite 195 tests / 6 properties と pymodbus suite 209 tests / 6 properties、ExDoc、AtomVM
+  compatibility check は failure 0。更新した Client を XIAO ESP32-C5 に書き込み、接続済み Server から
+  3 回連続で Holding Register を読めることを確認。default production `sample_app.avm` は 133,628 bytes、
+  SHA-256 は `dcba14b0f49e58e46cd86da0b01d6acd231a3879055136304dab9fc1e93b0e4a`、
+  134,860-byte budget まで 1,232 bytes
+- 初期 Function `0x03` 実験用の未使用 PDU helper を削除し、device identification helper の category を
+  `category:` option（既定 `:basic`）へ統一。host suite 196 tests / 6 properties、pymodbus suite
+  210 tests / 6 properties、ExDoc、AtomVM compatibility check は failure 0。更新した Client を実機へ
+  書き込み、接続済み Server から 3 回連続 read を確認。default production `sample_app.avm` は
+  133,700 bytes、SHA-256 は `35b9feaa92530cb8a04ad85ac992c97b9a6f1ce779a58152eb70520366ca175b`、
+  134,860-byte budget まで 1,160 bytes
+- Serial Transport の startup callback を instance 設定を受け取る `open/1` に統一し、`open/0`
+  compatibility fallback を削除。host coverage gate 81.08%、pymodbus suite 210 tests / 6 properties、
+  ExDoc、AtomVM compatibility check は failure 0。更新した Client を実機へ書き込み、接続済み Server
+  から 4 回連続 read を確認。default production `sample_app.avm` は 133,636 bytes、SHA-256 は
+  `b541be2f634900fde08471e55c4168284a55ae3267b8ca7663873732cfcf73d8`、
+  134,860-byte budget まで 1,224 bytes
+- reader monitor、UART adapter host tests、instance RX idle timeout 追加後の default production
+  `sample_app.avm` は 135,152 bytes、SHA-256 は
+  `91ae3116914314626be15b817700be9e6b1fc768ca41b0993c48b63f62e66f73`。
+  135,320-byte budget まで 168 bytes
+- bounded Serial Client queue 追加後は host 207 tests / 6 properties、pymodbus suite 221 tests / 6
+  properties、5 秒 combined soak が成功し、process count は 126 → 126。実 RS485 workflow も
+  3 cycle / 60 request を完走した。
+  default production `sample_app.avm` は 139,304 bytes、SHA-256 は
+  `dcc738627d9605846c5b9c8bfc1cd6393bba11acdcc5564c940fed3f44b2e612`、
+  139,500-byte budget まで 196 bytes
+- UART broker の terminal error を buffered / delayed data より優先し、buffer を破棄して最初の failure
+  reason を保持するよう修正。buffered data 後の failure、pending read 中の reader crash、timeout / failure、
+  broker / owner 終了、managed Client reopen を deterministic host test で確認
+- XIAO ESP32-C5 / HW-519、RTU 8N1、20 ms transmit gap で RX idle timeout を比較。9,600 baud / 20 ms と
+  115,200 baud / 20 ms はそれぞれ 3 cycle / 60 request を完走し、request min / average / max は
+  136 / 179 / 233 ms と 134 / 144 / 164 ms。9,600 baud / 10 ms は 5 request 目の
+  `write_multiple_registers` で timeout したため、既定 20 ms を維持
+- terminal error precedence 追加後の default production `sample_app.avm` は 139,660 bytes、SHA-256 は
+  `caf14c2fedee928f86721ee3084d2aa00ee22c1b8eeb592f9a1e60b9e1eaf41c`。139,860-byte budget まで
+  200 bytes の headroom を維持

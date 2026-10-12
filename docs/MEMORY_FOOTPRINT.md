@@ -35,22 +35,23 @@ probe は role startup 前後で GC を実行し、startup 後 100 ms 待って�
 free heap delta は managed process heap だけでなく、role module の load、UART resource、driver state も
 含む deployed-role の増分です。`process_info/2` の `:memory` は個別 BEAM process の推定値です。
 
-## 2026-10-09 基準値
+## 2026-10-12 基準値
 
 共通条件は RTU、9,600 baud、UART1、GPIO23 TX、GPIO24 RX、response 待機中または idle server です。
 
 | Role | Free heap before | Free heap after | Role delta | Process count | Managed process memory |
 | --- | ---: | ---: | ---: | ---: | --- |
-| RTU client | 179,720 B | 159,528 B | 20,192 B | 3 → 5 | client: 628 B |
-| RTU server | 179,576 B | 149,992 B | 29,584 B | 3 → 6 | memory: 560 B; server: 1,024 B |
+| RTU client | 179,656 B | 153,952 B | 25,704 B | 3 → 7 | client: 824 B |
+| RTU server | 179,528 B | 144,328 B | 35,200 B | 3 → 8 | memory: 560 B; server: 1,204 B |
 
 追加情報:
 
-- client: largest free block 139,264 B、minimum free 157,380 B、heap 93 words、stack 10 words
-- server: largest free block 131,072 B、minimum free 147,764 B
+- client: largest free block 139,264 B、minimum free 151,812 B、heap 142 words、stack 10 words
+- server: largest free block 126,976 B、minimum free 142,108 B
 - server memory process: heap 76 words、stack 10 words
-- server transport process: heap 187 words、stack 24 words
-- 両 role とも計測時の binary memory と managed mailbox length は 0
+- server transport process: heap 231 words、stack 23 words
+- 両 role とも計測時の binary memory は 0。client mailbox は 0、server mailbox は次の poll 1 件
+- process count には UART ごとの bounded broker と専用 reader の 2 process を含む
 
 toolchain、firmware、board、compile-time configuration、transport mode が変わる場合は別 baseline として
 記録します。diagnostic probe build は通常の artifact-size budget 対象には含めません。

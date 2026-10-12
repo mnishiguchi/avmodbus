@@ -41,8 +41,7 @@ defmodule AVModbus.Server do
   @doc """
   managed Modbus server を起動し、raw PID を返します。
 
-  transport 指定がなければ TCP server を起動します。serial server は
-  `transport: :rtu` / `transport: :ascii`、または `rtu: true` / `ascii: true` で選択します。
+  `:transport` は必須で、`:tcp`、`:rtu`、`:ascii` のいずれかを指定します。
   `:handler` と選択した transport module の options を同じ list に指定します。
   `transport: :tls`、`tls:`、`ssl:` は現在 `{:error, :tls_not_supported}` を返します。
   """
@@ -57,20 +56,16 @@ defmodule AVModbus.Server do
   def start_link(_options), do: {:error, :invalid_options}
 
   @doc "managed server の現在の transport state を返します。"
-  @spec status(pid() | atom() | tuple()) :: term()
-  def status(server), do: :gen_server.call(server_ref(server), :status)
+  @spec status(pid() | atom()) :: term()
+  def status(server), do: :gen_server.call(server, :status)
 
   @doc "TCP server が listen している port を返します。"
-  @spec port(pid() | atom() | tuple()) :: 0..65_535 | {:error, term()}
-  def port(server), do: :gen_server.call(server_ref(server), :port)
+  @spec port(pid() | atom()) :: 0..65_535 | {:error, term()}
+  def port(server), do: :gen_server.call(server, :port)
 
   @doc "managed server を停止し、所有する listener または UART を閉じます。"
-  @spec stop(pid() | atom() | tuple()) :: :ok
-  def stop(server), do: :gen_server.stop(server_ref(server))
-
-  @doc "`stop/1` の互換 alias です。"
-  @spec close(pid() | atom() | tuple()) :: :ok
-  def close(server), do: stop(server)
+  @spec stop(pid() | atom()) :: :ok
+  def stop(server), do: :gen_server.stop(server)
 
   @doc """
   request PDU を decode し、handler を呼び出して response PDU を encode します。
@@ -132,8 +127,7 @@ defmodule AVModbus.Server do
   def respond(_handler, _unit_id, _pdu, _handler_timeout, _policy), do: :ignore
 
   defp route(options) do
-    with {:ok, markers} <- transport_markers(options, []),
-         {:ok, transport} <- selected_transport(option(options, :transport, nil), markers) do
+    with {:ok, transport} <- selected_transport(option(options, :transport, nil)) do
       {:ok, transport_module(transport), remove_transport_options(options, [])}
     end
   end
@@ -147,53 +141,24 @@ defmodule AVModbus.Server do
 
   defp reject_tls([_option | rest]), do: reject_tls(rest)
 
-  defp transport_markers([], markers), do: {:ok, markers}
+  defp selected_transport(nil), do: {:error, :missing_transport_option}
 
-  defp transport_markers([{key, true} | rest], markers)
-       when key in [:tcp, :rtu, :ascii],
-       do: transport_markers(rest, [key | markers])
-
-  defp transport_markers([{key, _value} | _rest], _markers)
-       when key in [:tcp, :rtu, :ascii],
-       do: {:error, invalid_transport_marker(key)}
-
-  defp transport_markers([_option | rest], markers), do: transport_markers(rest, markers)
-
-  defp selected_transport(nil, []), do: {:ok, :tcp}
-  defp selected_transport(nil, [transport]), do: {:ok, transport}
-
-  defp selected_transport(transport, []) when transport in [:tcp, :rtu, :ascii],
+  defp selected_transport(transport) when transport in [:tcp, :rtu, :ascii],
     do: {:ok, transport}
 
-  defp selected_transport(nil, _multiple), do: {:error, :multiple_transport_options}
-
-  defp selected_transport(transport, _markers) when transport in [:tcp, :rtu, :ascii],
-    do: {:error, :multiple_transport_options}
-
-  defp selected_transport(_transport, _markers), do: {:error, :invalid_transport_option}
+  defp selected_transport(_transport), do: {:error, :invalid_transport_option}
 
   defp transport_module(:tcp), do: TCP
   defp transport_module(:rtu), do: RTU
   defp transport_module(:ascii), do: ASCII
 
-  defp invalid_transport_marker(:tcp), do: :invalid_tcp_option
-  defp invalid_transport_marker(:rtu), do: :invalid_rtu_option
-  defp invalid_transport_marker(:ascii), do: :invalid_ascii_option
-
   defp remove_transport_options([], reversed), do: reverse(reversed, [])
 
-  defp remove_transport_options([{key, _value} | rest], reversed)
-       when key in [:transport, :tcp, :rtu, :ascii],
-       do: remove_transport_options(rest, reversed)
+  defp remove_transport_options([{:transport, _value} | rest], reversed),
+    do: remove_transport_options(rest, reversed)
 
   defp remove_transport_options([option | rest], reversed),
     do: remove_transport_options(rest, [option | reversed])
-
-  defp server_ref({module, server})
-       when module in [TCP, RTU, ASCII] and (is_pid(server) or is_atom(server)),
-       do: server
-
-  defp server_ref(server), do: server
 
   defp option([], _key, default), do: default
   defp option([{key, value} | _rest], key, _default), do: value

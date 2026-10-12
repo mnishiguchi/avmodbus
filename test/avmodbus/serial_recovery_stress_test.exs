@@ -22,7 +22,7 @@ defmodule AVModbus.SerialRecoveryStressTest do
       )
     end
 
-    def open do
+    def open(_options) do
       Agent.get_and_update(__MODULE__, fn
         %{open_results: [result | rest]} = state ->
           {result, %{state | open_results: rest, open_count: state.open_count + 1}}
@@ -68,6 +68,7 @@ defmodule AVModbus.SerialRecoveryStressTest do
 
     {:ok, client} =
       Client.start_link(ReopeningTransport,
+        transport: :rtu,
         gap: 0,
         silence: 1,
         backoff: {1, 1}
@@ -145,7 +146,7 @@ defmodule AVModbus.SerialRecoveryStressTest do
   end
 
   defp stop_client(client) do
-    if Process.alive?(elem(client, 1)), do: Client.close(client)
+    if Process.alive?(elem(client, 1)), do: Client.stop(client)
   catch
     :exit, _reason -> :ok
   end

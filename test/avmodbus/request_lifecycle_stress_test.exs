@@ -44,7 +44,9 @@ defmodule AVModbus.RequestLifecycleStressTest do
   test "serial requests report once by their deadline while queued behind a slow transaction" do
     {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     {:ok, transport} = DeadlineTransport.start_link(response)
-    {:ok, client} = Client.start_link(DeadlineTransport, transport, gap: 0)
+
+    {:ok, client} =
+      Client.start_link(DeadlineTransport, transport, transport: :rtu, gap: 0)
 
     on_exit(fn ->
       stop_client(client)
@@ -102,7 +104,8 @@ defmodule AVModbus.RequestLifecycleStressTest do
 
     {:ok, client} =
       Client.start_link(
-        tcp: {127, 0, 0, 1},
+        transport: :tcp,
+        host: {127, 0, 0, 1},
         port: TCPServer.port(server),
         max_pending: 4
       )
@@ -211,7 +214,7 @@ defmodule AVModbus.RequestLifecycleStressTest do
   end
 
   defp stop_server(server) do
-    if Process.alive?(elem(server, 1)), do: TCPServer.stop(server)
+    if Process.alive?(server), do: TCPServer.stop(server)
   catch
     :exit, _reason -> :ok
   end

@@ -257,7 +257,7 @@ defmodule AVModbus.PropertyTest do
   property "a running TCP server survives every well-framed PDU" do
     handler = fn _unit, _request -> {:error, {:exception, :illegal_function}} end
     {:ok, server} = TCPServer.start_link(handler, port: 0, address: {127, 0, 0, 1})
-    on_exit(fn -> if Process.alive?(elem(server, 1)), do: TCPServer.close(server) end)
+    on_exit(fn -> if Process.alive?(server), do: TCPServer.stop(server) end)
 
     {:ok, socket} =
       :gen_tcp.connect({127, 0, 0, 1}, TCPServer.port(server), [:binary, active: false])
@@ -275,7 +275,7 @@ defmodule AVModbus.PropertyTest do
       assert answered in [function, bor(function, 0x80)]
     end
 
-    assert Process.alive?(elem(server, 1))
+    assert Process.alive?(server)
   end
 
   property "a running TCP client survives every well-framed answer" do
@@ -283,8 +283,11 @@ defmodule AVModbus.PropertyTest do
       :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])
 
     {:ok, {_address, port}} = :inet.sockname(listener)
-    {:ok, client} = Client.start_link(tcp: {127, 0, 0, 1}, port: port, backoff: {1, 1})
-    on_exit(fn -> if Process.alive?(elem(client, 1)), do: Client.close(client) end)
+
+    {:ok, client} =
+      Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, port: port, backoff: {1, 1})
+
+    on_exit(fn -> if Process.alive?(elem(client, 1)), do: Client.stop(client) end)
     {:ok, socket} = :gen_tcp.accept(listener, 1_000)
 
     check all(

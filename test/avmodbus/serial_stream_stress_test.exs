@@ -129,7 +129,7 @@ defmodule AVModbus.SerialStreamStressTest do
   end
 
   defp stop_server(server_module, server, transport) do
-    server_module.close(server)
+    server_module.stop(server)
     Agent.stop(transport)
   end
 

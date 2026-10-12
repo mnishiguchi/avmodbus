@@ -63,7 +63,7 @@ defmodule AVModbus.ClientRetryTest do
     {listener, port} = listen()
 
     {:ok, client} =
-      Client.start_link(tcp: {127, 0, 0, 1}, port: port, backoff: {5, 5})
+      Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, port: port, backoff: {5, 5})
 
     on_exit(fn ->
       client_pid = elem(client, 1)
@@ -154,6 +154,9 @@ defmodule AVModbus.ClientRetryTest do
     assert Client.request(client, 1, request, timeout: -1) ==
              {:error, :invalid_timeout_option}
 
+    assert Client.request(client, 1, request, 20) ==
+             {:error, :invalid_options}
+
     assert Client.request(client, 1, request, retries: -1) ==
              {:error, :invalid_retries_option}
 
@@ -165,7 +168,13 @@ defmodule AVModbus.ClientRetryTest do
 
   defp start_client(results) do
     {:ok, transport} = RetryTransport.start_link(results)
-    {:ok, client} = Client.start_link(RetryTransport, transport, gap: 0, silence: 1)
+
+    {:ok, client} =
+      Client.start_link(RetryTransport, transport,
+        transport: :rtu,
+        gap: 0,
+        silence: 1
+      )
 
     on_exit(fn ->
       client_pid = elem(client, 1)

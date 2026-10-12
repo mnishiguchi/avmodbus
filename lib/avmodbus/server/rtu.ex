@@ -5,8 +5,9 @@ defmodule AVModbus.Server.RTU do
   1 本の UART を所有し、fragmented request の再構築、line noise の除去、unit filtering、
   no-response の broadcast write を処理し、request semantics は `AVModbus.Server` に委譲します。
 
-  `start_link/2` は configured AtomVM UART を開きます。`start_link/4` は open 済み transport handle を受け取り、
-  UART を application 側で管理する場合や host-side tests に利用できます。
+  `start_link/2` は configured AtomVM UART を開き、`:serial` option で instance ごとに設定を上書きできます。
+  `start_link/4` は open 済み transport handle を受け取り、UART を application 側で管理する場合や
+  host-side tests に利用できます。
   """
 
   import Bitwise
@@ -17,15 +18,6 @@ defmodule AVModbus.Server.RTU do
   @behaviour :gen_server
 
   @default_echo Application.compile_env(:avmodbus, :modbus_echo, false)
-  @default_silence Application.compile_env(:avmodbus, :modbus_silence_ms, 20)
-  @default_gap_ms (
-                    configured = Application.compile_env(:avmodbus, :modbus_rtu_gap_ms, 0)
-                    speed = Application.compile_env(:avmodbus, :uart_speed, 9_600)
-
-                    if configured == 0,
-                      do: div(AVModbus.RTU.frame_gap_us(speed) + 999, 1_000),
-                      else: configured
-                  )
   @default_handler_timeout Application.compile_env(
                              :avmodbus,
                              :modbus_handler_timeout_ms,
@@ -36,6 +28,7 @@ defmodule AVModbus.Server.RTU do
                      :modbus_reconnect_backoff,
                      {100, 5_000}
                    )
+  @max_rtu_frame_size 256
 
   @diagnostic_counters %{
     0x0B => :bus_message,
@@ -51,13 +44,13 @@ defmodule AVModbus.Server.RTU do
   @ascii_in_frame ~c"0123456789ABCDEFabcdef:\r"
 
   @type server :: pid() | atom()
-  @type t :: {__MODULE__, server()}
   @type option ::
           {:mode, :rtu | :ascii}
           | {:units, [1..247]}
           | {:echo, boolean()}
           | {:silence, pos_integer()}
           | {:gap, non_neg_integer()}
+          | {:serial, keyword()}
           | {:handler_timeout, pos_integer() | :infinity}
           | {:backoff, {pos_integer(), pos_integer()}}
           | {:authorize, Server.authorize() | nil}
@@ -74,21 +67,21 @@ defmodule AVModbus.Server.RTU do
 
   @doc false
   def start_supervised(options) when is_list(options) do
-    with {:ok, handler, server_options} <- take_handler(options),
-         {:ok, {__MODULE__, pid}} <- start_link(handler, server_options) do
-      {:ok, pid}
+    with {:ok, handler, server_options} <- take_handler(options) do
+      start_link(handler, server_options)
     end
   end
 
   def start_supervised(_options), do: {:error, :invalid_options}
 
   @doc "configured UART を開き、`handler` 用の RTU server を起動します。"
-  @spec start_link(Server.handler(), [option()]) :: {:ok, t()} | {:error, term()}
+  @spec start_link(Server.handler(), [option()]) :: {:ok, pid()} | {:error, term()}
   def start_link(handler, options \\ [])
 
   def start_link(handler, options) when is_list(options) do
     with {:ok, name} <- server_name(options),
-         {:ok, config} <- server_config(handler, options) do
+         {:ok, config} <- server_config(handler, options),
+         :ok <- UART.validate_options(config.serial) do
       start_server({:open, UART, handler, config}, name)
     end
   end
@@ -96,7 +89,7 @@ defmodule AVModbus.Server.RTU do
   def start_link(_handler, _options), do: {:error, :invalid_options}
 
   @doc false
-  @spec start_link(module(), Server.handler(), [option()]) :: {:ok, t()} | {:error, term()}
+  @spec start_link(module(), Server.handler(), [option()]) :: {:ok, pid()} | {:error, term()}
   def start_link(transport, handler, options) when is_atom(transport) and is_list(options) do
     with {:ok, name} <- server_name(options),
          {:ok, config} <- server_config(handler, options) do
@@ -108,7 +101,7 @@ defmodule AVModbus.Server.RTU do
 
   @doc "open 済み transport handle 上で RTU server を起動します。"
   @spec start_link(module(), term(), Server.handler(), [option()]) ::
-          {:ok, t()} | {:error, term()}
+          {:ok, pid()} | {:error, term()}
   def start_link(transport, uart, handler, options)
       when is_atom(transport) and is_list(options) do
     with {:ok, name} <- server_name(options),
@@ -120,21 +113,11 @@ defmodule AVModbus.Server.RTU do
   def start_link(_transport, _uart, _handler, _options), do: {:error, :invalid_options}
 
   @doc "server を停止し、自身で open した UART を close します。"
-  @spec close(t() | server()) :: :ok
-  def close({__MODULE__, server}) when is_pid(server) or is_atom(server),
-    do: :gen_server.stop(server)
-
-  def close(server) when is_pid(server) or is_atom(server), do: :gen_server.stop(server)
-
-  @doc "server を停止し、自身で open した UART を close します。"
-  @spec stop(t() | server()) :: :ok
-  def stop(server), do: close(server)
+  @spec stop(server()) :: :ok
+  def stop(server), do: :gen_server.stop(server)
 
   @doc "`:connected` または reopen 中の最新 transport error を返します。"
-  @spec status(t() | server()) :: :connected | {:disconnected, term()}
-  def status({__MODULE__, server}) when is_pid(server) or is_atom(server),
-    do: :gen_server.call(server, :status)
-
+  @spec status(server()) :: :connected | {:disconnected, term()}
   def status(server) when is_pid(server) or is_atom(server),
     do: :gen_server.call(server, :status)
 
@@ -161,6 +144,9 @@ defmodule AVModbus.Server.RTU do
   @impl true
   def handle_info(:poll, %{status: :connected} = state) do
     case poll(state) do
+      {:ok, %{buffer: buffer} = next} when buffer != <<>> ->
+        handle_info(:poll, next)
+
       {:ok, next} ->
         send(self(), :poll)
         {:noreply, next}
@@ -204,6 +190,7 @@ defmodule AVModbus.Server.RTU do
       echo: config.echo,
       silence: config.silence,
       gap: config.gap,
+      serial: config.serial,
       handler_timeout: config.handler_timeout,
       authorize: config.authorize,
       identification: config.identification,
@@ -222,7 +209,7 @@ defmodule AVModbus.Server.RTU do
   end
 
   defp open(state) do
-    case state.transport.open() do
+    case Serial.open_transport(state.transport, state.serial) do
       {:ok, uart} ->
         send(self(), :poll)
         %{state | uart: uart, status: :connected, reopen_delay: state.backoff_min}
@@ -257,7 +244,7 @@ defmodule AVModbus.Server.RTU do
     case state.transport.read(state.uart, state.silence) do
       {:ok, data} when is_binary(data) and data != <<>> ->
         {echoing, input} = Serial.strip_echo(state.echoing, data)
-        consume(%{state | echoing: echoing, buffer: state.buffer <> input})
+        consume_input(%{state | echoing: echoing}, input)
 
       {:ok, <<>>} ->
         complete_silence(state)
@@ -270,6 +257,41 @@ defmodule AVModbus.Server.RTU do
 
       other ->
         {:stop, {:transport_read, other}, state}
+    end
+  end
+
+  defp consume_input(%{mode: :ascii} = state, input),
+    do: consume(%{state | buffer: state.buffer <> input})
+
+  defp consume_input(%{mode: :rtu} = state, <<>>), do: consume(state)
+
+  defp consume_input(%{mode: :rtu, buffer: buffer} = state, input) do
+    capacity = @max_rtu_frame_size - byte_size(buffer)
+
+    if capacity == 0 do
+      case consume(state) do
+        {:ok, %{buffer: next_buffer} = next} when byte_size(next_buffer) < @max_rtu_frame_size ->
+          consume_input(next, input)
+
+        {:ok, next} ->
+          reset =
+            next
+            |> count(:bus_character_overrun)
+            |> Map.merge(%{buffer: <<>>, garbage: false})
+
+          consume_input(reset, input)
+
+        {:stop, _reason, _next} = stop ->
+          stop
+      end
+    else
+      chunk_size = min(capacity, byte_size(input))
+      <<chunk::binary-size(chunk_size), rest::binary>> = input
+
+      case consume(%{state | buffer: buffer <> chunk}) do
+        {:ok, next} -> consume_input(next, rest)
+        {:stop, _reason, _next} = stop -> stop
+      end
     end
   end
 
@@ -642,12 +664,7 @@ defmodule AVModbus.Server.RTU do
   defp listen_bit(%{listen_only: true}), do: 0x20
   defp listen_bit(_state), do: 0
 
-  defp start_server(init_arg, name) do
-    case gen_server_start(init_arg, name) do
-      {:ok, pid} -> {:ok, {__MODULE__, pid}}
-      {:error, _reason} = error -> error
-    end
-  end
+  defp start_server(init_arg, name), do: gen_server_start(init_arg, name)
 
   defp gen_server_start(init_arg, nil), do: :gen_server.start_link(__MODULE__, init_arg, [])
 
@@ -657,10 +674,12 @@ defmodule AVModbus.Server.RTU do
   defp server_config(handler, options) do
     with :ok <- validate_options(options),
          mode = option(options, :mode, :rtu),
+         serial = option(options, :serial, []),
+         {:ok, defaults} <- Serial.Config.defaults(mode, serial),
          units = option(options, :units, []),
          echo = option(options, :echo, @default_echo),
-         silence = option(options, :silence, @default_silence),
-         gap = option(options, :gap, default_gap(mode)),
+         silence = option(options, :silence, defaults.silence),
+         gap = option(options, :gap, defaults.gap),
          handler_timeout = option(options, :handler_timeout, @default_handler_timeout),
          backoff = option(options, :backoff, @default_backoff),
          authorize = option(options, :authorize, nil),
@@ -678,6 +697,7 @@ defmodule AVModbus.Server.RTU do
       {:ok,
        %{
          mode: mode,
+         serial: serial,
          units: units,
          echo: echo,
          silence: silence,
@@ -699,6 +719,7 @@ defmodule AVModbus.Server.RTU do
               :echo,
               :silence,
               :gap,
+              :serial,
               :handler_timeout,
               :backoff,
               :authorize,
@@ -775,9 +796,6 @@ defmodule AVModbus.Server.RTU do
 
   defp validate_mode(value) when value in [:rtu, :ascii], do: :ok
   defp validate_mode(_value), do: {:error, :invalid_mode_option}
-
-  defp default_gap(:ascii), do: 0
-  defp default_gap(_mode), do: @default_gap_ms
 
   defp encode_frame(%{mode: :rtu}, unit_id, pdu), do: RTU.encode(unit_id, pdu)
 

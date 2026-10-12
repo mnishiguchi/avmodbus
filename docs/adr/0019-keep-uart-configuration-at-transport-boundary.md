@@ -9,6 +9,7 @@ peripheral、pin、baud、parity などを Client / Server option に重複さ�
 
 - built-in `AVModbus.UART` の hardware 設定は application configuration に置く
 - managed Client / Server に同じ UART option を追加しない
+- serial transport は instance 設定を受け取る `open/1` を必須 callback とする
 - runtime 選択が必要な application は UART handle または custom transport を注入する
 - injected handle の close / reopen は application が所有する
 - managed reopen を保つ runtime override が必要になった場合は transport configuration として設計する

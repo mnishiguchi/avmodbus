@@ -8,6 +8,7 @@ defmodule SampleApp do
 
   @role Application.compile_env(:sample_app, :modbus_role, :client)
   @mode Application.compile_env(:sample_app, :modbus_mode, :rtu)
+  @serial Application.compile_env(:sample_app, :modbus_serial, [])
   @tcp_host Application.compile_env(:sample_app, :modbus_tcp_host, "127.0.0.1")
   @tcp_port Application.compile_env(:sample_app, :modbus_tcp_port, 502)
   @unit_id Application.compile_env(:sample_app, :modbus_unit_id, 1)
@@ -47,8 +48,8 @@ defmodule SampleApp do
   defp start_client(baseline) do
     options =
       if @mode == :tcp,
-        do: [tcp: @tcp_host, port: @tcp_port, timeout: @timeout_ms],
-        else: [mode: @mode, timeout: @timeout_ms]
+        do: [transport: :tcp, host: @tcp_host, port: @tcp_port, timeout: @timeout_ms],
+        else: [transport: @mode, serial: @serial, timeout: @timeout_ms]
 
     case Client.start_link(options) do
       {:ok, client} ->
@@ -94,6 +95,7 @@ defmodule SampleApp do
       case server_module.start_link(
              handler,
              units: [@unit_id],
+             serial: @serial,
              identification: @identification
            ) do
         {:ok, server} -> {:ok, server_module, server}
@@ -174,8 +176,7 @@ defmodule SampleApp do
     defp client_processes({Client, pid}), do: [client: pid]
     defp client_processes({Client, pid, :tcp}), do: [client: pid]
 
-    defp server_processes(memory, {_module, pid}),
-      do: [memory: memory, server: pid]
+    defp server_processes(memory, pid), do: [memory: memory, server: pid]
   else
     defp memory_snapshot, do: nil
     defp client_processes(_client), do: []

@@ -10,7 +10,8 @@
 - public Client API は tagged handle、raw PID、registered local name を受け付ける
 - raw PID / name の transport kind は Client process に問い合わせる
 - `:name` は local atom registration とする
-- `stop/1` を標準 lifecycle API とし、`close/1` も維持する
+- managed lifecycle API は `stop/1` に統一する
+- raw UART の lifecycle は AVModbus.UART の open / close で管理する
 
 ## 影響
 

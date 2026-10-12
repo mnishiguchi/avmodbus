@@ -38,7 +38,8 @@ defmodule AVModbus.TCPServerLoadTest do
       for unit_id <- 1..@client_count do
         {:ok, client} =
           Client.start_link(
-            tcp: {127, 0, 0, 1},
+            transport: :tcp,
+            host: {127, 0, 0, 1},
             port: TCPServer.port(server),
             max_pending: 4
           )
@@ -121,7 +122,7 @@ defmodule AVModbus.TCPServerLoadTest do
   end
 
   defp stop_server(server) do
-    if Process.alive?(elem(server, 1)), do: TCPServer.stop(server)
+    if Process.alive?(server), do: TCPServer.stop(server)
   catch
     :exit, _reason -> :ok
   end

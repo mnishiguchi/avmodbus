@@ -46,7 +46,7 @@ defmodule AVModbus.RTU do
   caller は 1 byte 捨てて再試行し、後続の valid frame を保持できます。
   """
   @spec split_response(binary(), 1..247, PDU.request()) ::
-          {:ok, binary(), binary()} | :more | :unknown | :skip
+          {:ok, binary(), binary()} | :more | :unknown | :skip | :overflow
   def split_response(<<>>, _unit_id, _request), do: :more
 
   def split_response(<<unit_id, _rest::binary>>, expected_unit_id, _request)
@@ -56,8 +56,8 @@ defmodule AVModbus.RTU do
   def split_response(<<_unit_id, pdu::binary>> = buffer, _expected_unit_id, request) do
     case PDU.response_length(request, pdu) do
       {:ok, pdu_size} -> extract_known_length(buffer, pdu_size + 3)
-      :unknown -> :unknown
-      :more -> if byte_size(buffer) < @max_frame_size, do: :more, else: :skip
+      :unknown -> if byte_size(buffer) <= @max_frame_size, do: :unknown, else: :overflow
+      :more -> if byte_size(buffer) < @max_frame_size, do: :more, else: :overflow
       :invalid -> :skip
     end
   end

@@ -18,10 +18,10 @@ defmodule AVModbus.ADUBoundaryTest do
     assert RTU.decode(rtu) == {:ok, 247, pdu}
     assert RTU.complete_silence_request(rtu) == {:ok, rtu}
 
-    assert {:ok, ascii} = ASCII.encode(255, pdu)
+    assert {:ok, ascii} = ASCII.encode(247, pdu)
     assert byte_size(ascii) == 513
     assert ASCII.split(ascii) == {:ok, ascii, <<>>}
-    assert ASCII.decode(ascii) == {:ok, 255, pdu}
+    assert ASCII.decode(ascii) == {:ok, 247, pdu}
   end
 
   test "rejects a PDU one byte beyond the transport maximum" do

@@ -52,9 +52,16 @@ defmodule AVModbus.ASCIITest do
   end
 
   test "enforces frame and input bounds" do
+    assert {:ok, frame} = ASCII.encode(247, <<3>>)
+    assert ASCII.decode(frame) == {:ok, 247, <<3>>}
+    assert ASCII.encode(248, <<3>>) == {:error, :invalid_unit_id}
     assert ASCII.encode(256, <<3>>) == {:error, :invalid_unit_id}
     assert ASCII.encode(1, <<>>) == {:error, :invalid_pdu}
     assert ASCII.encode(1, <<3>>, 256) == {:error, :invalid_delimiter}
+
+    data = <<248, 3>>
+    reserved = ":F803" <> Base.encode16(<<ASCII.lrc(data)>>) <> "\r\n"
+    assert ASCII.decode(reserved) == {:error, :invalid_frame}
 
     long = <<?:, :binary.copy("00", 300)::binary>>
     assert ASCII.split(long) == {:skip, <<>>}

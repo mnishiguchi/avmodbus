@@ -45,7 +45,7 @@ defmodule AVModbus.LibmodbusInteropTest do
   test "AVModbus client interoperates with a libmodbus server", %{peer: peer} do
     port = free_port()
     {:ok, _peer_port} = start_peer_server(peer, port)
-    {:ok, client} = Client.start_link(tcp: {127, 0, 0, 1}, port: port)
+    {:ok, client} = Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, port: port)
     on_exit(fn -> if Process.alive?(elem(client, 1)), do: Client.stop(client) end)
 
     check_client(client)
@@ -74,7 +74,7 @@ defmodule AVModbus.LibmodbusInteropTest do
   } do
     {:ok, pty} = PTYTransport.start_link(python)
     {:ok, peer_port} = start_peer_server(peer, PTYTransport.path(pty), :rtu)
-    {:ok, client} = Client.start_link(PTYTransport, pty, mode: :rtu, gap: 0)
+    {:ok, client} = Client.start_link(PTYTransport, pty, transport: :rtu, gap: 0)
 
     on_exit(fn ->
       if Process.alive?(elem(client, 1)), do: Client.stop(client)
@@ -95,7 +95,7 @@ defmodule AVModbus.LibmodbusInteropTest do
       RTUServer.start_link(PTYTransport, pty, {Memory, memory}, units: [1], gap: 0)
 
     on_exit(fn ->
-      if Process.alive?(elem(server, 1)), do: RTUServer.close(server)
+      if Process.alive?(server), do: RTUServer.stop(server)
       if Process.alive?(memory), do: GenServer.stop(memory)
       if Process.alive?(pty), do: PTYTransport.close(pty)
     end)
@@ -105,31 +105,39 @@ defmodule AVModbus.LibmodbusInteropTest do
   end
 
   defp check_client(client, timeout_ms \\ 1_000, peer_port \\ nil) do
-    result = Client.read_holding_registers(client, 1, 0, 3, timeout_ms)
+    result = Client.read_holding_registers(client, 1, 0, 3, timeout: timeout_ms)
     assert_peer_result(result, {:ok, [1000, 1001, 1002]}, peer_port)
 
-    assert Client.read_input_registers(client, 1, 98, 2, timeout_ms) == {:ok, [2098, 2099]}
-    assert Client.read_coils(client, 1, 0, 4, timeout_ms) == {:ok, [true, false, false, true]}
+    assert Client.read_input_registers(client, 1, 98, 2, timeout: timeout_ms) ==
+             {:ok, [2098, 2099]}
 
-    assert Client.read_discrete_inputs(client, 1, 0, 4, timeout_ms) ==
+    assert Client.read_coils(client, 1, 0, 4, timeout: timeout_ms) ==
+             {:ok, [true, false, false, true]}
+
+    assert Client.read_discrete_inputs(client, 1, 0, 4, timeout: timeout_ms) ==
              {:ok, [true, false, true, false]}
 
-    assert Client.write_multiple_registers(client, 1, 50, [5, 6], timeout_ms) == :ok
-    assert Client.read_holding_registers(client, 1, 50, 2, timeout_ms) == {:ok, [5, 6]}
-    assert Client.write_single_coil(client, 1, 1, true, timeout_ms) == :ok
-    assert Client.write_multiple_coils(client, 1, 10, [true, true, false], timeout_ms) == :ok
-    assert Client.read_coils(client, 1, 10, 3, timeout_ms) == {:ok, [true, true, false]}
-    assert Client.mask_write_register(client, 1, 5, 0xF2, 0x25, timeout_ms) == :ok
-    assert Client.read_holding_registers(client, 1, 5, 1, timeout_ms) == {:ok, [0xE5]}
+    assert Client.write_multiple_registers(client, 1, 50, [5, 6], timeout: timeout_ms) == :ok
+    assert Client.read_holding_registers(client, 1, 50, 2, timeout: timeout_ms) == {:ok, [5, 6]}
+    assert Client.write_single_coil(client, 1, 1, true, timeout: timeout_ms) == :ok
 
-    assert Client.read_write_multiple_registers(client, 1, 70, 2, 70, [9, 10], timeout_ms) ==
+    assert Client.write_multiple_coils(client, 1, 10, [true, true, false], timeout: timeout_ms) ==
+             :ok
+
+    assert Client.read_coils(client, 1, 10, 3, timeout: timeout_ms) == {:ok, [true, true, false]}
+    assert Client.mask_write_register(client, 1, 5, 0xF2, 0x25, timeout: timeout_ms) == :ok
+    assert Client.read_holding_registers(client, 1, 5, 1, timeout: timeout_ms) == {:ok, [0xE5]}
+
+    assert Client.read_write_multiple_registers(client, 1, 70, 2, 70, [9, 10],
+             timeout: timeout_ms
+           ) ==
              {:ok, [9, 10]}
 
-    assert Client.read_holding_registers(client, 1, 99, 2, timeout_ms) ==
+    assert Client.read_holding_registers(client, 1, 99, 2, timeout: timeout_ms) ==
              {:error, {:exception, :illegal_data_address}}
 
     assert {:ok, <<_id, 0xFF, "LMB", _version::binary>>} =
-             Client.request(client, 1, :report_server_id, timeout_ms)
+             Client.request(client, 1, :report_server_id, timeout: timeout_ms)
   end
 
   defp start_peer_server(peer, target, transport \\ :tcp) do

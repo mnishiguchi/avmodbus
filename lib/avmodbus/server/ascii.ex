@@ -10,7 +10,6 @@ defmodule AVModbus.Server.ASCII do
   alias AVModbus.Server.RTU, as: SerialServer
 
   @type server :: pid() | atom()
-  @type t :: {__MODULE__, server()}
   @type option :: SerialServer.option()
 
   @doc false
@@ -23,63 +22,49 @@ defmodule AVModbus.Server.ASCII do
 
   @doc false
   def start_supervised(options) when is_list(options) do
-    with {:ok, handler, server_options} <- take_handler(options),
-         {:ok, {__MODULE__, pid}} <- start_link(handler, server_options) do
-      {:ok, pid}
+    with {:ok, handler, server_options} <- take_handler(options) do
+      start_link(handler, server_options)
     end
   end
 
   def start_supervised(_options), do: {:error, :invalid_options}
 
   @doc "configured UART を開いて ASCII server を起動します。"
-  @spec start_link(Server.handler(), [option()]) :: {:ok, t()} | {:error, term()}
+  @spec start_link(Server.handler(), [option()]) :: {:ok, pid()} | {:error, term()}
   def start_link(handler, options \\ [])
 
   def start_link(handler, options) when is_list(options) do
-    translate(SerialServer.start_link(handler, [{:mode, :ascii} | options]))
+    SerialServer.start_link(handler, [{:mode, :ascii} | options])
   end
 
   def start_link(_handler, _options), do: {:error, :invalid_options}
 
   @doc false
-  @spec start_link(module(), Server.handler(), [option()]) :: {:ok, t()} | {:error, term()}
+  @spec start_link(module(), Server.handler(), [option()]) :: {:ok, pid()} | {:error, term()}
   def start_link(transport, handler, options) when is_atom(transport) and is_list(options) do
-    translate(SerialServer.start_link(transport, handler, [{:mode, :ascii} | options]))
+    SerialServer.start_link(transport, handler, [{:mode, :ascii} | options])
   end
 
   def start_link(_transport, _handler, _options), do: {:error, :invalid_options}
 
   @doc "open 済み transport handle 上で ASCII server を起動します。"
   @spec start_link(module(), term(), Server.handler(), [option()]) ::
-          {:ok, t()} | {:error, term()}
+          {:ok, pid()} | {:error, term()}
   def start_link(transport, uart, handler, options)
       when is_atom(transport) and is_list(options) do
-    translate(SerialServer.start_link(transport, uart, handler, [{:mode, :ascii} | options]))
+    SerialServer.start_link(transport, uart, handler, [{:mode, :ascii} | options])
   end
 
   def start_link(_transport, _uart, _handler, _options), do: {:error, :invalid_options}
 
   @doc "ASCII server を停止します。"
-  @spec close(t() | server()) :: :ok
-  def close({__MODULE__, server}) when is_pid(server) or is_atom(server),
-    do: :gen_server.stop(server)
-
-  def close(server) when is_pid(server) or is_atom(server), do: :gen_server.stop(server)
-
-  @doc "ASCII server を停止します。"
-  @spec stop(t() | server()) :: :ok
-  def stop(server), do: close(server)
+  @spec stop(server()) :: :ok
+  def stop(server), do: :gen_server.stop(server)
 
   @doc "UART connection state を返します。"
-  @spec status(t() | server()) :: :connected | {:disconnected, term()}
-  def status({__MODULE__, server}) when is_pid(server) or is_atom(server),
-    do: :gen_server.call(server, :status)
-
+  @spec status(server()) :: :connected | {:disconnected, term()}
   def status(server) when is_pid(server) or is_atom(server),
     do: :gen_server.call(server, :status)
-
-  defp translate({:ok, {SerialServer, pid}}), do: {:ok, {__MODULE__, pid}}
-  defp translate({:error, _reason} = error), do: error
 
   defp option([], _key, default), do: default
   defp option([{key, value} | _rest], key, _default), do: value

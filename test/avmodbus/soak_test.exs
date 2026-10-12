@@ -96,7 +96,7 @@ defmodule AVModbus.SoakTest do
       Client.start_link(
         DuplexTransport,
         DuplexTransport.endpoint(transport, :a),
-        mode: mode,
+        transport: mode,
         gap: 0,
         silence: 2
       )
@@ -124,7 +124,8 @@ defmodule AVModbus.SoakTest do
 
     {:ok, client} =
       Client.start_link(
-        tcp: {127, 0, 0, 1},
+        transport: :tcp,
+        host: {127, 0, 0, 1},
         port: TCPServer.port(server),
         max_pending: 4
       )
@@ -239,7 +240,7 @@ defmodule AVModbus.SoakTest do
 
   defp client_pid({Client, pid}), do: pid
   defp client_pid({Client, pid, :tcp}), do: pid
-  defp server_pid({_module, pid}), do: pid
+  defp server_pid(pid), do: pid
 
   defp eventually(function, attempts \\ 200)
   defp eventually(_function, 0), do: false

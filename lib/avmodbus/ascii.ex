@@ -15,11 +15,11 @@ defmodule AVModbus.ASCII do
   def lrc(data) when is_binary(data), do: band(0x100 - rem(sum(data, 0), 0x100), 0xFF)
 
   @doc "unit id と PDU を完全な Modbus ASCII frame に encode します。"
-  @spec encode(0..255, binary(), byte()) :: {:ok, binary()} | {:error, term()}
+  @spec encode(0..247, binary(), byte()) :: {:ok, binary()} | {:error, term()}
   def encode(unit_id, pdu, delimiter \\ ?\n)
 
   def encode(unit_id, pdu, delimiter)
-      when is_integer(unit_id) and unit_id >= 0 and unit_id <= 255 and is_binary(pdu) and
+      when is_integer(unit_id) and unit_id >= 0 and unit_id <= 247 and is_binary(pdu) and
              byte_size(pdu) >= 1 and byte_size(pdu) <= 253 and is_integer(delimiter) and
              delimiter >= 0 and delimiter <= 255 do
     data = <<unit_id, pdu::binary>>
@@ -29,7 +29,7 @@ defmodule AVModbus.ASCII do
   end
 
   def encode(unit_id, _pdu, _delimiter)
-      when not is_integer(unit_id) or unit_id < 0 or unit_id > 255,
+      when not is_integer(unit_id) or unit_id < 0 or unit_id > 247,
       do: {:error, :invalid_unit_id}
 
   def encode(_unit_id, pdu, _delimiter)
@@ -39,7 +39,7 @@ defmodule AVModbus.ASCII do
   def encode(_unit_id, _pdu, _delimiter), do: {:error, :invalid_delimiter}
 
   @doc "完全な Modbus ASCII frame を decode し、LRC を検証します。"
-  @spec decode(binary()) :: {:ok, 0..255, binary()} | {:error, :invalid_lrc | :invalid_frame}
+  @spec decode(binary()) :: {:ok, 0..247, binary()} | {:error, :invalid_lrc | :invalid_frame}
   def decode(frame)
       when is_binary(frame) and byte_size(frame) >= 9 and byte_size(frame) <= @max_frame_size do
     hex_size = byte_size(frame) - 3
@@ -88,9 +88,11 @@ defmodule AVModbus.ASCII do
       <<unit_id, pdu::binary-size(pdu_size), checksum>> = bytes
       data = <<unit_id, pdu::binary>>
 
-      if lrc(data) == checksum,
-        do: {:ok, unit_id, pdu},
-        else: {:error, :invalid_lrc}
+      cond do
+        unit_id > 247 -> {:error, :invalid_frame}
+        lrc(data) != checksum -> {:error, :invalid_lrc}
+        true -> {:ok, unit_id, pdu}
+      end
     else
       _error -> {:error, :invalid_frame}
     end

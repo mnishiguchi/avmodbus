@@ -9,13 +9,14 @@ defmodule AVModbus.ServerFacadeTest do
   @server_name __MODULE__.ManagedServer
   @direct_name __MODULE__.DirectServer
 
-  test "routes to TCP by default and runs under a supervisor" do
+  test "routes explicit TCP selection and runs under a supervisor" do
     memory = start_supervised!({Memory, holding_registers: 10}, id: make_ref())
 
     server =
       start_supervised!(
         {Server,
          [
+           transport: :tcp,
            handler: {Memory, memory},
            port: 0,
            address: {127, 0, 0, 1},
@@ -28,11 +29,13 @@ defmodule AVModbus.ServerFacadeTest do
     assert Server.status(server) == {:listening, 0}
     port = Server.port(@server_name)
 
-    {:ok, client} = Client.start_link(tcp: {127, 0, 0, 1}, port: port)
+    {:ok, client} =
+      Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, port: port)
+
     on_exit(fn -> if Process.alive?(elem(client, 1)), do: Client.stop(client) end)
 
-    assert Client.write_single_register(client, 1, 3, 42, 500) == :ok
-    assert Client.read_holding_registers(client, 1, 3, 1, 500) == {:ok, [42]}
+    assert Client.write_single_register(client, 1, 3, 42, timeout: 500) == :ok
+    assert Client.read_holding_registers(client, 1, 3, 1, timeout: 500) == {:ok, [42]}
 
     capture_log(fn ->
       Process.exit(server, :kill)
@@ -48,13 +51,13 @@ defmodule AVModbus.ServerFacadeTest do
     assert Server.status(@server_name) == {:listening, 0}
   end
 
-  test "accepts explicit TCP selection and transport tagged handles" do
+  test "returns raw pids from facade and transport modules" do
     handler = fn _unit_id, _request -> {:error, {:exception, :illegal_function}} end
 
     {:ok, direct} =
       Server.start_link(
         handler: handler,
-        tcp: true,
+        transport: :tcp,
         port: 0,
         address: {127, 0, 0, 1},
         name: @direct_name
@@ -64,19 +67,22 @@ defmodule AVModbus.ServerFacadeTest do
     assert is_integer(Server.port(@direct_name))
     assert Server.stop(@direct_name) == :ok
 
-    {:ok, tagged} =
+    {:ok, tcp_server} =
       TCPServer.start_link(handler, port: 0, address: {127, 0, 0, 1})
 
-    assert Server.status(tagged) == {:listening, 0}
-    assert is_integer(Server.port(tagged))
-    assert Server.close(tagged) == :ok
+    assert is_pid(tcp_server)
+    assert Server.status(tcp_server) == {:listening, 0}
+    assert is_integer(Server.port(tcp_server))
+    assert Server.stop(tcp_server) == :ok
   end
 
   test "validates unified transport selection" do
     handler = fn _unit_id, _request -> :ok end
 
     assert Server.start_link(:invalid) == {:error, :invalid_options}
-    assert Server.start_link(port: 0) == {:error, :missing_handler_option}
+    assert Server.start_link(port: 0) == {:error, :missing_transport_option}
+
+    assert Server.start_link(handler: handler) == {:error, :missing_transport_option}
 
     assert Server.start_link(handler: handler, transport: :udp) ==
              {:error, :invalid_transport_option}
@@ -87,16 +93,13 @@ defmodule AVModbus.ServerFacadeTest do
     assert Server.start_link(handler: handler, ssl: []) == {:error, :tls_not_supported}
     assert Server.start_link(handler: handler, tls: true) == {:error, :tls_not_supported}
 
-    assert Server.start_link(handler: handler, rtu: false) ==
-             {:error, :invalid_rtu_option}
-
-    assert Server.start_link(handler: handler, rtu: true, ascii: true) ==
-             {:error, :multiple_transport_options}
+    assert Server.start_link(handler: handler, rtu: true) ==
+             {:error, :missing_transport_option}
 
     assert Server.start_link(handler: handler, transport: :tcp, tcp: true) ==
-             {:error, :multiple_transport_options}
+             {:error, {:invalid_option, {:tcp, true}}}
 
-    assert Server.start_link(handler: handler, tcp: true, unknown: 1) ==
+    assert Server.start_link(handler: handler, transport: :tcp, unknown: 1) ==
              {:error, {:invalid_option, {:unknown, 1}}}
   end
 

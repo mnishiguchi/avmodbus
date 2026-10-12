@@ -38,16 +38,28 @@ modbus_mode =
     _ -> :rtu
   end
 
+serial = [
+  peripheral: System.get_env("ATOMVM_UART_PERIPHERAL") || "UART1",
+  speed: parse_integer.("ATOMVM_UART_SPEED", 9_600),
+  tx: parse_integer.("ATOMVM_UART_TX_PIN", 23),
+  rx: parse_integer.("ATOMVM_UART_RX_PIN", 24),
+  data_bits: parse_integer.("ATOMVM_UART_DATA_BITS", 8),
+  stop_bits: parse_integer.("ATOMVM_UART_STOP_BITS", 1),
+  parity: uart_parity,
+  rx_idle_timeout: parse_integer.("ATOMVM_UART_RX_IDLE_TIMEOUT_MS", 20)
+]
+
 # XIAO ESP32-C5: keep UART0 on D6/GPIO11 + D7/GPIO12 available for the
 # AtomVM console, and route application Modbus traffic through UART1 on D4/D5.
 config :avmodbus,
-  uart_peripheral: System.get_env("ATOMVM_UART_PERIPHERAL") || "UART1",
-  uart_speed: parse_integer.("ATOMVM_UART_SPEED", 9_600),
-  uart_tx_pin: parse_integer.("ATOMVM_UART_TX_PIN", 23),
-  uart_rx_pin: parse_integer.("ATOMVM_UART_RX_PIN", 24),
-  uart_data_bits: parse_integer.("ATOMVM_UART_DATA_BITS", 8),
-  uart_stop_bits: parse_integer.("ATOMVM_UART_STOP_BITS", 1),
-  uart_parity: uart_parity,
+  uart_peripheral: serial[:peripheral],
+  uart_speed: serial[:speed],
+  uart_tx_pin: serial[:tx],
+  uart_rx_pin: serial[:rx],
+  uart_data_bits: serial[:data_bits],
+  uart_stop_bits: serial[:stop_bits],
+  uart_parity: serial[:parity],
+  uart_rx_idle_timeout_ms: serial[:rx_idle_timeout],
   modbus_echo: modbus_echo,
   modbus_rtu_gap_ms: parse_integer.("MODBUS_RTU_GAP_MS", 0),
   modbus_silence_ms: parse_integer.("MODBUS_SILENCE_MS", 20),
@@ -60,6 +72,7 @@ config :avmodbus,
 config :sample_app,
   modbus_role: modbus_role,
   modbus_mode: modbus_mode,
+  modbus_serial: serial,
   modbus_tcp_host: System.get_env("MODBUS_TCP_HOST") || "127.0.0.1",
   modbus_tcp_port: parse_integer.("MODBUS_TCP_PORT", 502),
   modbus_unit_id: parse_integer.("MODBUS_UNIT_ID", 1),

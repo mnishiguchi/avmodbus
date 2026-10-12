@@ -3,6 +3,17 @@ defmodule AVModbus.Serial do
   Modbus serial-line implementation で共有する transport-independent helper です。
   """
 
+  @doc false
+  def open_transport(transport, options) when is_atom(transport) and is_list(options) do
+    try do
+      transport.open(options)
+    catch
+      :error, :undef -> {:error, :transport_open_not_supported}
+    end
+  end
+
+  def open_transport(_transport, _options), do: {:error, :invalid_transport}
+
   @doc """
   `data` の先頭から expected adapter echo と一致する部分を取り除きます。
 

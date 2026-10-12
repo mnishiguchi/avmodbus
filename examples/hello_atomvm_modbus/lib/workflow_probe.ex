@@ -35,12 +35,14 @@ if Application.compile_env(:sample_app, :workflow_probe, false) do
     alias SampleApp.WorkflowTransport
 
     @cycles Application.compile_env(:sample_app, :workflow_probe_cycles, 3)
+    @mode Application.compile_env(:sample_app, :modbus_mode, :rtu)
     @unit_id Application.compile_env(:sample_app, :modbus_unit_id, 1)
     @timeout_ms Application.compile_env(:sample_app, :modbus_response_timeout_ms, 1_000)
     @speed Application.compile_env(:avmodbus, :uart_speed, 9_600)
+    @rx_idle_timeout_ms Application.compile_env(:avmodbus, :uart_rx_idle_timeout_ms, 20)
     @turnaround_ms Application.compile_env(:avmodbus, :modbus_broadcast_turnaround_ms, 100)
     @configured_gap_ms Application.compile_env(:sample_app, :workflow_probe_gap_ms, 20)
-    @calculated_gap_ms div(RTU.frame_gap_us(@speed) + 999, 1_000)
+    @calculated_gap_ms if(@mode == :rtu, do: div(RTU.frame_gap_us(@speed) + 999, 1_000), else: 0)
     @gap_ms if(@configured_gap_ms > 0, do: @configured_gap_ms, else: @calculated_gap_ms)
     @echo_test_value 0xA55A
     @identification %{0 => "AVModbus", 1 => "Seeed Studio XIAO ESP32-C5", 2 => "0.1.0"}
@@ -101,7 +103,7 @@ if Application.compile_env(:sample_app, :workflow_probe, false) do
     end
 
     defp classify_echo do
-      with {:ok, uart} <- UART.open() do
+      with {:ok, uart} <- UART.open([]) do
         result = classify_echo(uart)
         UART.close(uart)
         flush_transport_events()
@@ -112,6 +114,7 @@ if Application.compile_env(:sample_app, :workflow_probe, false) do
     defp classify_echo(uart) do
       with {:ok, client} <-
              Client.start_link(WorkflowTransport, {uart, self()},
+               transport: @mode,
                echo: true,
                gap: @gap_ms,
                timeout: 250
@@ -129,7 +132,7 @@ if Application.compile_env(:sample_app, :workflow_probe, false) do
     end
 
     defp run_workflow do
-      with {:ok, uart} <- UART.open() do
+      with {:ok, uart} <- UART.open([]) do
         result = run_workflow(uart)
         UART.close(uart)
         result
@@ -139,6 +142,7 @@ if Application.compile_env(:sample_app, :workflow_probe, false) do
     defp run_workflow(uart) do
       with {:ok, client} <-
              Client.start_link(WorkflowTransport, {uart, self()},
+               transport: @mode,
                echo: false,
                gap: @gap_ms,
                turnaround: @turnaround_ms,
@@ -180,10 +184,10 @@ if Application.compile_env(:sample_app, :workflow_probe, false) do
     end
 
     defp invoke(client, {:request, unit_id, request}),
-      do: Client.request(client, unit_id, request, @timeout_ms)
+      do: Client.request(client, unit_id, request, timeout: @timeout_ms)
 
     defp invoke(client, :device_identification),
-      do: Client.read_device_identification(client, @unit_id, :basic, @timeout_ms)
+      do: Client.read_device_identification(client, @unit_id, timeout: @timeout_ms)
 
     defp empty_stats do
       %{
@@ -264,11 +268,13 @@ if Application.compile_env(:sample_app, :workflow_probe, false) do
     defp report_success(echo, stats) do
       IO.puts(
         "modbus_workflow result=ok cycles=#{@cycles} requests=#{stats.requests} " <>
-          "echo=#{echo} speed=#{@speed} gap_calculated_ms=#{@calculated_gap_ms} " <>
+          "mode=#{@mode} echo=#{echo} speed=#{@speed} " <>
+          "rx_idle_timeout_ms=#{@rx_idle_timeout_ms} gap_calculated_ms=#{@calculated_gap_ms} " <>
           "gap_configured_ms=#{@gap_ms} " <>
           "gap_observed_min_ms=#{stats.min_gap_ms} turnaround_required_ms=#{@turnaround_ms} " <>
           "turnaround_observed_ms=#{stats.broadcast_ms} request_min_ms=#{stats.min_request_ms} " <>
-          "request_max_ms=#{stats.max_request_ms} total_ms=#{stats.total_ms}"
+          "request_max_ms=#{stats.max_request_ms} " <>
+          "request_average_ms=#{div(stats.total_ms, stats.requests)} total_ms=#{stats.total_ms}"
       )
     end
 

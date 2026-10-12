@@ -15,7 +15,8 @@ defmodule AVModbus.ClientSupervisionTest do
       start_supervised!(
         {Client,
          [
-           tcp: {127, 0, 0, 1},
+           transport: :tcp,
+           host: {127, 0, 0, 1},
            port: port,
            name: @client_name,
            backoff: {10, 10}
@@ -28,12 +29,14 @@ defmodule AVModbus.ClientSupervisionTest do
     socket = accept(listener)
     assert eventually(fn -> Client.status(@client_name) == :connected end)
 
-    task = Task.async(fn -> Client.read_coils(client, 1, 0, 1, 500) end)
+    task = Task.async(fn -> Client.read_coils(client, 1, 0, 1, timeout: 500) end)
     {:ok, transaction, unit, _request} = next_frame(socket)
     :ok = answer(socket, transaction, unit, <<0x01, 0x01, 0x01>>)
     assert Task.await(task) == {:ok, [true]}
 
-    reference = Client.send_request(@client_name, 1, {:read_holding_registers, 4, 1}, 500)
+    reference =
+      Client.send_request(@client_name, 1, {:read_holding_registers, 4, 1}, timeout: 500)
+
     {:ok, transaction, unit, _request} = next_frame(socket)
     :ok = answer(socket, transaction, unit, <<0x03, 0x02, 0x00, 0x2A>>)
     assert_receive {Client, ^reference, {:ok, [42]}}, 500
@@ -56,11 +59,11 @@ defmodule AVModbus.ClientSupervisionTest do
   test "stop accepts a registered name and validates name options" do
     {listener, port} = listen()
 
-    assert Client.start_link(tcp: {127, 0, 0, 1}, port: port, name: "invalid") ==
+    assert Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, port: port, name: "invalid") ==
              {:error, :invalid_name_option}
 
     {:ok, {Client, client, :tcp}} =
-      Client.start_link(tcp: {127, 0, 0, 1}, port: port, name: @stopped_name)
+      Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, port: port, name: @stopped_name)
 
     _socket = accept(listener)
     assert Process.whereis(@stopped_name) == client

@@ -1,7 +1,7 @@
 # ロードマップ
 
 AVModbus は、AtomVM で Modbus RTU / ASCII / TCP の Client と Server を提供します。
-主要機能と当初予定した検証は完了しており、現在は機能追加より互換性と安定性の維持を優先します。
+主要機能と当初予定した検証は完了しており、現在は 1.0 前の API 整理と安定性の向上を優先します。
 Hex package としての公開は完了条件に含めません。
 
 ## 完了した範囲
@@ -19,12 +19,43 @@ Hex package としての公開は完了条件に含めません。
 詳細な設計は [Architecture](ARCHITECTURE.md)、検証履歴は [Worklog](worklog/README.md) を参照してください。
 測定値は [Memory footprint](MEMORY_FOOTPRINT.md) と [Artifact size](ARTIFACT_SIZE.md) に集約しています。
 
-## 継続して確認すること
+## 次の改善
 
-- AtomVM `release-0.7` または firmware を更新したときの API / runtime compatibility
-- protocol や queue policy を変更したときの property / stress / soak test
-- device profile を変更したときの UART timing、memory、artifact size
-- socket、UART、peer failure 後に process と resource が回復すること
+### Phase 1: UART の timing と lifecycle
+
+- [x] Modbus silence と UART RX idle drain を分離し、実機で安全な値を確認する
+- [x] broker が reader の終了を検知し、待機中の read と Client / Server へ失敗を伝える
+- [x] terminal error を buffered / delayed data より優先し、最初の failure reason を保持する
+- [x] `modbus_rtu_gap_ms` を計算値の下限として扱い、境界値をテストする
+- [x] managed transport と injected transport の ownership を API と文書で一致させる
+- [x] data / timeout / cancel / overflow / owner・reader 終了と Client reopen の broker test を通常の BEAM で実行する
+
+### Phase 2: compatibility と bounded resource
+
+- [x] Modbus ASCII で予約済み Unit ID `248..255` を拒否する
+- [x] CI で AtomVM compatibility check と `.avm` package 作成を実行する
+- [x] Serial Client の async request queue に上限と overflow policy を設ける
+- [x] queue と recovery の変更後に property / stress / soak test を再実行する
+
+### Phase 3: release 前の確認
+
+- [x] public API と error tuple を確認し、async admission、Unit ID、ownership、queue error の契約を明文化する
+- [x] official AtomVM `v0.7.0-beta.0` (`8d3e051`) で compile、package、TCP resource probe、
+  実 RS485 smoke test を再実行する
+- [x] RX idle timeout と baud rate の latency を実機で比較し、20 ms の安定性を再確認する
+- [x] codec / allocation の最適化は現在の実機・soak test に bottleneck の証拠がないため見送る
+
+module 分割は目的にせず、責務の変更や決定的な test の追加に必要な場合だけ行います。
+
+## 継続的な release gate
+
+- official AtomVM `release-0.7` image を更新した場合は、CI の 3 build variant、artifact size、
+  TCP resource probe、実 RS485 workflow を再実行する
+- ESP32-C5 上の CPU、GC、free heap 計測で codec が bottleneck と確認できた場合だけ、CRC / ASCII の
+  allocation 最適化を再検討する
+- public API を変更する場合は、同期戻り値、async admission、error tuple、ownership を同時に更新する
+- `uart_rx_idle_timeout_ms` を短縮する場合は、長い frame を含む 60-request workflow を複数 baud rate で
+  完走し、timeout / CRC error が増えず、latency 改善が再現することを条件とする
 
 ## Platform に依存する制約
 
@@ -44,6 +75,7 @@ TLS option は `{:error, :tls_not_supported}` を返し、暗号化なしへ切�
 ## 対象外
 
 - Hex package の公開と release workflow
-- USB-RS485 adapter / commercial Modbus device の追加検証
+- 現在所有していない機材を必要とする multi-drop RS485 検証
+- HW-519 以外の transceiver、USB-RS485 adapter、commercial Modbus device の追加検証
 - RTU-over-TCP など標準外 transport
 - test adapter を除く AtomVM 以外の runtime 向け transport adapter

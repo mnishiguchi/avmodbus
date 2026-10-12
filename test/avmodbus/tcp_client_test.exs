@@ -17,11 +17,11 @@ defmodule AVModbus.TCPClientTest do
   end
 
   defp start_client(port, options \\ [], host \\ {127, 0, 0, 1}) do
-    {:ok, client} = Client.start_link([tcp: host, port: port] ++ options)
+    {:ok, client} = Client.start_link([transport: :tcp, host: host, port: port] ++ options)
 
     on_exit(fn ->
       pid = elem(client, 1)
-      if Process.alive?(pid), do: Client.close(client)
+      if Process.alive?(pid), do: Client.stop(client)
     end)
 
     client
@@ -85,16 +85,16 @@ defmodule AVModbus.TCPClientTest do
     socket = accept(listener)
     assert eventually(fn -> Client.status(client) == :connected end)
 
-    first = Client.send_request(client, 1, {:read_holding_registers, 0, 1}, 1_000)
-    second = Client.send_request(client, 1, {:read_holding_registers, 1, 1}, 1_000)
-    third = Client.send_request(client, 1, {:read_holding_registers, 2, 1}, 1_000)
-    rejected = Client.send_request(client, 1, {:read_holding_registers, 3, 1}, 1_000)
+    first = Client.send_request(client, 1, {:read_holding_registers, 0, 1}, timeout: 1_000)
+    second = Client.send_request(client, 1, {:read_holding_registers, 1, 1}, timeout: 1_000)
+    third = Client.send_request(client, 1, {:read_holding_registers, 2, 1}, timeout: 1_000)
+    rejected = Client.send_request(client, 1, {:read_holding_registers, 3, 1}, timeout: 1_000)
 
     {:ok, first_transaction, 1, <<3, 0::16, 1::16>>} = next_frame(socket)
-    assert_receive {Client, ^rejected, {:error, :queue_full}}, 500
+    assert rejected == {:error, :queue_full}
 
     blocked =
-      Task.async(fn -> Client.read_holding_registers(client, 1, 4, 1, 1_000) end)
+      Task.async(fn -> Client.read_holding_registers(client, 1, 4, 1, timeout: 1_000) end)
 
     assert Task.await(blocked) == {:error, :queue_full}
     assert :gen_tcp.recv(socket, 0, 50) == {:error, :timeout}
@@ -107,7 +107,7 @@ defmodule AVModbus.TCPClientTest do
 
     assert results([first, second, third]) == [{:ok, [10]}, {:ok, [11]}, {:ok, [12]}]
 
-    recovered = Client.send_request(client, 1, {:read_holding_registers, 5, 1}, 1_000)
+    recovered = Client.send_request(client, 1, {:read_holding_registers, 5, 1}, timeout: 1_000)
     {:ok, recovered_transaction, 1, <<3, 5::16, 1::16>>} = next_frame(socket)
     :ok = answer(socket, recovered_transaction, 1, <<3, 2, 15::16>>)
     assert_receive {Client, ^recovered, {:ok, [15]}}, 500
@@ -119,11 +119,11 @@ defmodule AVModbus.TCPClientTest do
     socket = accept(listener)
     assert eventually(fn -> Client.status(client) == :connected end)
 
-    accepted = Client.send_request(client, 1, {:read_coils, 0, 1}, 1_000)
-    rejected = Client.send_request(client, 1, {:read_coils, 1, 1}, 1_000)
+    accepted = Client.send_request(client, 1, {:read_coils, 0, 1}, timeout: 1_000)
+    rejected = Client.send_request(client, 1, {:read_coils, 1, 1}, timeout: 1_000)
     {:ok, transaction_id, 1, <<1, 0::16, 1::16>>} = next_frame(socket)
 
-    assert_receive {Client, ^rejected, {:error, :queue_full}}, 500
+    assert rejected == {:error, :queue_full}
     :ok = answer(socket, transaction_id, 1, <<1, 1, 1>>)
     assert_receive {Client, ^accepted, {:ok, [true]}}, 500
   end
@@ -158,7 +158,7 @@ defmodule AVModbus.TCPClientTest do
 
     for host <- ["::1", address] do
       client = start_client(port, [], host)
-      task = Task.async(fn -> Client.read_coils(client, 1, 0, 1, 500) end)
+      task = Task.async(fn -> Client.read_coils(client, 1, 0, 1, timeout: 500) end)
       socket = accept(listener)
       {:ok, transaction_id, unit_id, _pdu} = next_frame(socket)
       :ok = answer(socket, transaction_id, unit_id, <<1, 1, 1>>)
@@ -206,7 +206,7 @@ defmodule AVModbus.TCPClientTest do
   test "checks response units unless explicitly disabled" do
     {listener, port} = listen()
     client = start_client(port)
-    task = Task.async(fn -> Client.read_coils(client, 3, 0, 1, 500) end)
+    task = Task.async(fn -> Client.read_coils(client, 3, 0, 1, timeout: 500) end)
     socket = accept(listener)
     {:ok, transaction_id, 3, _pdu} = next_frame(socket)
     :ok = answer(socket, transaction_id, 5, <<1, 1, 1>>)
@@ -214,7 +214,7 @@ defmodule AVModbus.TCPClientTest do
 
     {other_listener, other_port} = listen()
     unchecked = start_client(other_port, check_unit: false)
-    other_task = Task.async(fn -> Client.read_coils(unchecked, 3, 0, 1, 500) end)
+    other_task = Task.async(fn -> Client.read_coils(unchecked, 3, 0, 1, timeout: 500) end)
     other_socket = accept(other_listener)
     {:ok, other_transaction, 3, _pdu} = next_frame(other_socket)
     :ok = answer(other_socket, other_transaction, 255, <<1, 1, 1>>)
@@ -225,8 +225,8 @@ defmodule AVModbus.TCPClientTest do
     {listener, port} = listen()
     client = start_client(port, max_pending: 1)
     socket = accept(listener)
-    slow = Client.send_request(client, 1, {:read_coils, 0, 1}, 50)
-    next = Client.send_request(client, 1, {:read_coils, 1, 1}, 500)
+    slow = Client.send_request(client, 1, {:read_coils, 0, 1}, timeout: 50)
+    next = Client.send_request(client, 1, {:read_coils, 1, 1}, timeout: 500)
     {:ok, slow_transaction, 1, _pdu} = next_frame(socket)
 
     assert_receive {Client, ^slow, {:error, :timeout}}, 500
@@ -245,7 +245,7 @@ defmodule AVModbus.TCPClientTest do
     socket = accept(listener)
 
     for _index <- 1..2 do
-      task = Task.async(fn -> Client.read_coils(client, 1, 0, 1, 50) end)
+      task = Task.async(fn -> Client.read_coils(client, 1, 0, 1, timeout: 50) end)
       assert {:ok, _transaction_id, 1, _pdu} = next_frame(socket)
       assert Task.await(task) == {:error, :timeout}
     end
@@ -253,7 +253,7 @@ defmodule AVModbus.TCPClientTest do
     assert :gen_tcp.recv(socket, 0, 500) == {:error, :closed}
     next_socket = accept(listener)
     assert eventually(fn -> Client.status(client) == :connected end)
-    task = Task.async(fn -> Client.read_coils(client, 1, 0, 1, 500) end)
+    task = Task.async(fn -> Client.read_coils(client, 1, 0, 1, timeout: 500) end)
     {:ok, transaction_id, unit_id, _pdu} = next_frame(next_socket)
     :ok = answer(next_socket, transaction_id, unit_id, <<1, 1, 0>>)
     assert Task.await(task) == {:ok, [false]}
@@ -262,7 +262,7 @@ defmodule AVModbus.TCPClientTest do
   test "closes an invalid stream and reconnects" do
     {listener, port} = listen()
     client = start_client(port, backoff: {10, 10})
-    first = Client.send_request(client, 1, {:read_coils, 0, 1}, 500)
+    first = Client.send_request(client, 1, {:read_coils, 0, 1}, timeout: 500)
     socket = accept(listener)
     {:ok, transaction_id, 1, _pdu} = next_frame(socket)
     :ok = :gen_tcp.send(socket, <<transaction_id::16, 0::16, 60_000::16, 1>>)
@@ -272,7 +272,7 @@ defmodule AVModbus.TCPClientTest do
 
     next_socket = accept(listener)
     assert eventually(fn -> Client.status(client) == :connected end)
-    task = Task.async(fn -> Client.read_coils(client, 1, 0, 1, 500) end)
+    task = Task.async(fn -> Client.read_coils(client, 1, 0, 1, timeout: 500) end)
     {:ok, next_transaction, unit_id, _pdu} = next_frame(next_socket)
     :ok = answer(next_socket, next_transaction, unit_id, <<1, 1, 1>>)
     assert Task.await(task) == {:ok, [true]}
@@ -281,8 +281,8 @@ defmodule AVModbus.TCPClientTest do
   test "fails pending and queued requests once after a peer half-close, then reconnects" do
     {listener, port} = listen()
     client = start_client(port, max_pending: 1, backoff: {10, 10})
-    first = Client.send_request(client, 1, {:read_coils, 0, 1}, 500)
-    second = Client.send_request(client, 1, {:read_coils, 1, 1}, 500)
+    first = Client.send_request(client, 1, {:read_coils, 0, 1}, timeout: 500)
+    second = Client.send_request(client, 1, {:read_coils, 1, 1}, timeout: 500)
     socket = accept(listener)
 
     assert {:ok, _transaction_id, 1, <<1, 0::16, 1::16>>} = next_frame(socket)
@@ -297,7 +297,7 @@ defmodule AVModbus.TCPClientTest do
 
     next_socket = accept(listener)
     assert eventually(fn -> Client.status(client) == :connected end)
-    task = Task.async(fn -> Client.read_coils(client, 1, 2, 1, 500) end)
+    task = Task.async(fn -> Client.read_coils(client, 1, 2, 1, timeout: 500) end)
     {:ok, transaction_id, unit_id, <<1, 2::16, 1::16>>} = next_frame(next_socket)
     :ok = answer(next_socket, transaction_id, unit_id, <<1, 1, 1>>)
     assert Task.await(task) == {:ok, [true]}
@@ -306,7 +306,7 @@ defmodule AVModbus.TCPClientTest do
   test "fails an in-flight request after a peer reset, then reconnects" do
     {listener, port} = listen()
     client = start_client(port, backoff: {10, 10})
-    reference = Client.send_request(client, 1, {:read_coils, 0, 1}, 500)
+    reference = Client.send_request(client, 1, {:read_coils, 0, 1}, timeout: 500)
     socket = accept(listener)
 
     assert {:ok, _transaction_id, 1, <<1, 0::16, 1::16>>} = next_frame(socket)
@@ -318,7 +318,7 @@ defmodule AVModbus.TCPClientTest do
 
     next_socket = accept(listener)
     assert eventually(fn -> Client.status(client) == :connected end)
-    task = Task.async(fn -> Client.read_coils(client, 1, 1, 1, 500) end)
+    task = Task.async(fn -> Client.read_coils(client, 1, 1, 1, timeout: 500) end)
     {:ok, transaction_id, unit_id, <<1, 1::16, 1::16>>} = next_frame(next_socket)
     :ok = answer(next_socket, transaction_id, unit_id, <<1, 1, 0>>)
     assert Task.await(task) == {:ok, [false]}
@@ -329,38 +329,44 @@ defmodule AVModbus.TCPClientTest do
     :ok = :gen_tcp.close(listener)
     client = start_client(port, backoff: {20, 20})
     assert eventually(fn -> match?({:disconnected, _reason}, Client.status(client)) end)
-    assert Client.read_coils(client, 1, 0, 1, 100) == {:error, :closed}
+    assert Client.read_coils(client, 1, 0, 1, timeout: 100) == {:error, :closed}
 
     {next_listener, ^port} = listen(port)
     socket = accept(next_listener)
     assert eventually(fn -> Client.status(client) == :connected end)
-    task = Task.async(fn -> Client.read_coils(client, 255, 0, 1, 500) end)
+    task = Task.async(fn -> Client.read_coils(client, 255, 0, 1, timeout: 500) end)
     {:ok, transaction_id, 255, _pdu} = next_frame(socket)
     :ok = answer(socket, transaction_id, 255, <<1, 1, 1>>)
     assert Task.await(task) == {:ok, [true]}
   end
 
   test "validates TCP client options" do
-    assert Client.start_link(tcp: :invalid) == {:error, :invalid_tcp_host}
-    assert Client.start_link(tcp: {127, 0, 0}) == {:error, :invalid_tcp_host}
-    assert Client.start_link(tcp: {127, 0, 0, 1}, port: 0) == {:error, :invalid_port_option}
+    assert Client.start_link(tcp: :invalid) == {:error, :missing_transport_option}
+    assert Client.start_link(transport: :tcp) == {:error, :missing_host_option}
+    assert Client.start_link(transport: :tcp, host: :invalid) == {:error, :invalid_tcp_host}
 
-    assert Client.start_link(tcp: {127, 0, 0, 1}, max_pending: 0) ==
+    assert Client.start_link(transport: :tcp, host: {127, 0, 0}) ==
+             {:error, :invalid_tcp_host}
+
+    assert Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, port: 0) ==
+             {:error, :invalid_port_option}
+
+    assert Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, max_pending: 0) ==
              {:error, :invalid_max_pending_option}
 
-    assert Client.start_link(tcp: {127, 0, 0, 1}, max_queue: -1) ==
+    assert Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, max_queue: -1) ==
              {:error, :invalid_max_queue_option}
 
-    assert Client.start_link(tcp: {127, 0, 0, 1}, check_unit: :no) ==
+    assert Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, check_unit: :no) ==
              {:error, :invalid_check_unit_option}
 
-    assert Client.start_link(tcp: {127, 0, 0, 1}, connect_timeout: 0) ==
+    assert Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, connect_timeout: 0) ==
              {:error, :invalid_connect_timeout_option}
 
-    assert Client.start_link(tcp: {127, 0, 0, 1}, timeout: 0) ==
+    assert Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, timeout: 0) ==
              {:error, :invalid_timeout_option}
 
-    assert Client.start_link(tcp: {127, 0, 0, 1}, echo: true) ==
+    assert Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, echo: true) ==
              {:error, {:invalid_option, {:echo, true}}}
   end
 
@@ -372,7 +378,7 @@ defmodule AVModbus.TCPClientTest do
     Process.unlink(pid)
     Process.exit(pid, :kill)
     assert eventually(fn -> not Process.alive?(pid) end)
-    assert Client.read_coils(client, 1, 0, 1, 100) == {:error, :closed}
+    assert Client.read_coils(client, 1, 0, 1, timeout: 100) == {:error, :closed}
   end
 
   defp eventually(function, attempts \\ 100)

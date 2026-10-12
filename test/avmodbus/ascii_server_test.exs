@@ -42,6 +42,59 @@ defmodule AVModbus.ASCIIServerTest do
     def close(_agent), do: :ok
   end
 
+  defmodule GapSensitiveTransport do
+    def start_link(first, tail) do
+      owner = self()
+      Agent.start_link(fn -> %{chunks: [first, tail], owner: owner} end)
+    end
+
+    def read(agent, timeout_ms) do
+      chunk =
+        case Agent.get(agent, & &1.chunks) do
+          [first, _tail] ->
+            Agent.update(agent, fn %{chunks: [_first | rest]} = state ->
+              %{state | chunks: rest}
+            end)
+
+            send(self(), {:gap_sensitive_tail, agent})
+            first
+
+          [tail] ->
+            available =
+              receive do
+                {:gap_sensitive_tail, ^agent} -> true
+              after
+                0 -> false
+              end
+
+            if available do
+              Agent.update(agent, fn state -> %{state | chunks: []} end)
+              tail
+            else
+              nil
+            end
+
+          [] ->
+            nil
+        end
+
+      if is_binary(chunk) do
+        {:ok, chunk}
+      else
+        Process.sleep(timeout_ms)
+        {:error, :timeout}
+      end
+    end
+
+    def write(agent, data) do
+      owner = Agent.get(agent, & &1.owner)
+      send(owner, {:gap_sensitive_write, data})
+      :ok
+    end
+
+    def close(_agent), do: :ok
+  end
+
   test "reassembles a noisy fragmented ASCII request and replies" do
     memory = start_supervised!({Memory, holding_registers: 10})
     :ok = Memory.put(memory, :holding_register, 2, [42])
@@ -58,6 +111,27 @@ defmodule AVModbus.ASCIIServerTest do
     assert_receive {:ascii_transport_write, response}, 500
     assert {:ok, 3, response_pdu} = ASCII.decode(response)
     assert PDU.decode_response(request, response_pdu) == {:ok, [42]}
+    stop_server(server, transport)
+  end
+
+  test "continues reading a partial ASCII frame without yielding" do
+    memory = start_supervised!({Memory, holding_registers: 40})
+    request = {:read_write_multiple_registers, 30, 3, 30, [7, 8]}
+    {:ok, pdu} = PDU.encode_request(request)
+    {:ok, frame} = ASCII.encode(3, pdu)
+    <<first::binary-size(32), tail::binary>> = frame
+    {:ok, transport} = GapSensitiveTransport.start_link(first, tail)
+
+    {:ok, server} =
+      ASCIIServer.start_link(GapSensitiveTransport, transport, {Memory, memory},
+        units: [3],
+        silence: 5,
+        gap: 0
+      )
+
+    assert_receive {:gap_sensitive_write, response}, 500
+    assert {:ok, 3, response_pdu} = ASCII.decode(response)
+    assert PDU.decode_response(request, response_pdu) == {:ok, [7, 8, 0]}
     stop_server(server, transport)
   end
 
@@ -118,7 +192,7 @@ defmodule AVModbus.ASCIIServerTest do
   end
 
   defp stop_server(server, transport) do
-    ASCIIServer.close(server)
+    ASCIIServer.stop(server)
     Agent.stop(transport)
   end
 

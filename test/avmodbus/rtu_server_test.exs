@@ -63,7 +63,7 @@ defmodule AVModbus.RTUServerTest do
       )
     end
 
-    def open do
+    def open(_options) do
       Agent.get_and_update(__MODULE__, fn
         %{open_results: [result | rest]} = state ->
           {result, %{state | open_results: rest, open_count: state.open_count + 1}}
@@ -119,6 +119,23 @@ defmodule AVModbus.RTUServerTest do
 
     FakeTransport.push(transport, <<0xFF, head::binary>>)
     FakeTransport.push(transport, tail)
+
+    assert_receive {:transport_write, response}, 500
+    assert {:ok, 3, response_pdu} = RTU.decode(response)
+    assert PDU.decode_response(request, response_pdu) == {:ok, [42]}
+    stop_server(server, transport)
+  end
+
+  test "bounds an unknown request and recovers a following frame from the same read" do
+    memory = start_supervised!({Memory, holding_registers: 10})
+    :ok = Memory.put(memory, :holding_register, 2, [42])
+    {transport, server} = start_server({Memory, memory})
+
+    oversized_unknown = <<3, 100, :binary.copy(<<0>>, 254)::binary>>
+    request = {:read_holding_registers, 2, 1}
+    {:ok, pdu} = PDU.encode_request(request)
+    {:ok, frame} = RTU.encode(3, pdu)
+    FakeTransport.push(transport, oversized_unknown <> frame)
 
     assert_receive {:transport_write, response}, 500
     assert {:ok, 3, response_pdu} = RTU.decode(response)
@@ -429,7 +446,7 @@ defmodule AVModbus.RTUServerTest do
     assert PDU.decode_response({:read_holding_registers, 0, 1}, response_pdu) == {:ok, [0]}
     assert ReopeningTransport.open_count() == 2
 
-    RTUServer.close(server)
+    RTUServer.stop(server)
     assert ReopeningTransport.close_count() == 1
     Agent.stop(transport_state)
   end
@@ -460,7 +477,7 @@ defmodule AVModbus.RTUServerTest do
     ReopeningTransport.push({:ok, request_frame})
     assert_receive {:reopening_transport_write, _response_frame}, 500
 
-    RTUServer.close(server)
+    RTUServer.stop(server)
     assert ReopeningTransport.close_count() == 2
     Agent.stop(transport_state)
   end
@@ -531,7 +548,7 @@ defmodule AVModbus.RTUServerTest do
   end
 
   defp stop_server(server, transport) do
-    RTUServer.close(server)
+    RTUServer.stop(server)
     Agent.stop(transport)
   end
 

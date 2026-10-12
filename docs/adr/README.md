@@ -30,6 +30,7 @@
 - [0016: serial async result を deadline 内に一度だけ通知する](0016-arbitrate-serial-async-deadlines.md)
 - [0017: TCP Client の待機 queue を制限する](0017-bound-tcp-client-queue.md)
 - [0018: Client の既定 timeout を起動時に設定する](0018-configure-client-default-timeout.md)
+- [0020: async request の受付を同期して resource 上限を守る](0020-admit-async-requests-synchronously.md)
 
 ## Security
 

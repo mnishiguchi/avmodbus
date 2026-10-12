@@ -5,7 +5,7 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 artifact=${AVMODBUS_AVM_PATH:-$repo_dir/examples/hello_atomvm_modbus/sample_app.avm}
-budget=${AVMODBUS_AVM_BUDGET_BYTES:-126200}
+budget=${AVMODBUS_AVM_BUDGET_BYTES:-139860}
 
 case "$budget" in
   ''|*[!0-9]*)

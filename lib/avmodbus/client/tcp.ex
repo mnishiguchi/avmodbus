@@ -46,18 +46,23 @@ defmodule AVModbus.Client.TCP do
     {:noreply, submit(state, entry)}
   end
 
-  def handle_call(_message, _from, state), do: {:reply, {:error, :unsupported_call}, state}
-
-  @impl true
-  def handle_cast(
-        {:request, unit_id, request, timing, recipient, reference},
+  def handle_call(
+        {:send_request, unit_id, request, timing, recipient, reference},
+        _from,
         state
       ) do
     {deadline_ms, allow_expired} = Client.resolve_request_timing(timing, state.timeout)
     entry = new_entry(unit_id, request, deadline_ms, allow_expired, {:send, recipient, reference})
-    {:noreply, submit(state, entry)}
+
+    case admit(state, entry) do
+      {:ok, next} -> {:reply, :ok, next}
+      {{:error, _reason} = error, next} -> {:reply, error, next}
+    end
   end
 
+  def handle_call(_message, _from, state), do: {:reply, {:error, :unsupported_call}, state}
+
+  @impl true
   def handle_cast(_message, state), do: {:noreply, state}
 
   @impl true
@@ -129,27 +134,34 @@ defmodule AVModbus.Client.TCP do
     }
   end
 
-  defp submit(%{status: {:disconnected, _reason}} = state, entry) do
-    reply(entry, {:error, :closed})
-    state
+  defp submit(state, entry) do
+    case admit(state, entry) do
+      {:ok, next} ->
+        next
+
+      {{:error, _reason} = error, next} ->
+        reply(entry, error)
+        next
+    end
   end
 
-  defp submit(state, entry) do
+  defp admit(%{status: {:disconnected, _reason}} = state, _entry),
+    do: {{:error, :closed}, state}
+
+  defp admit(state, entry) do
     case PDU.encode_request(entry.request) do
       {:ok, pdu} ->
         if queue_full?(state) do
-          reply(entry, {:error, :queue_full})
-          state
+          {{:error, :queue_full}, state}
         else
           timeout_ms = max(entry.deadline_ms - monotonic_ms(), 0)
           timer = Process.send_after(self(), {:expire, entry.id}, timeout_ms)
           queued = %{entry | pdu: pdu, timer: timer}
-          flush(%{state | queue: queue_in(state.queue, queued)})
+          {:ok, flush(%{state | queue: queue_in(state.queue, queued)})}
         end
 
       {:error, _reason} = error ->
-        reply(entry, error)
-        state
+        {error, state}
     end
   end
 

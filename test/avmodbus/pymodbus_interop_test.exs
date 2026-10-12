@@ -85,14 +85,14 @@ defmodule AVModbus.PymodbusInteropTest do
   end
 
   defp check_extension_client(client, timeout_ms \\ 1_000) do
-    assert Client.custom(client, 1, 0x41, <<1, 2, 3>>, timeout_ms) == {:ok, <<3, 2, 1>>}
+    assert Client.custom(client, 1, 0x41, <<1, 2, 3>>, timeout: timeout_ms) == {:ok, <<3, 2, 1>>}
 
-    assert Client.encapsulated_interface_transport(client, 1, 0x0D, <<4, 5>>, timeout_ms) ==
+    assert Client.encapsulated_interface_transport(client, 1, 0x0D, <<4, 5>>, timeout: timeout_ms) ==
              {:ok, <<5, 4>>}
   end
 
   defp check_serial_diagnostics_client(client, timeout_ms) do
-    assert Client.diagnostics(client, 1, 0, [0xA537], timeout_ms) == {:ok, [0xA537]}
+    assert Client.diagnostics(client, 1, 0, [0xA537], timeout: timeout_ms) == {:ok, [0xA537]}
   end
 
   defp extension_handler(1, {:custom, 0x41, <<1, 2, 3>>}), do: {:ok, <<3, 2, 1>>}
@@ -112,32 +112,38 @@ defmodule AVModbus.PymodbusInteropTest do
   end
 
   defp check_client(client, timeout_ms \\ 1_000, peer_port \\ nil) do
-    result = Client.read_holding_registers(client, 1, 0, 3, timeout_ms)
+    result = Client.read_holding_registers(client, 1, 0, 3, timeout: timeout_ms)
     assert_peer_result(result, {:ok, [1000, 1001, 1002]}, peer_port)
 
-    assert Client.read_input_registers(client, 1, 98, 2, timeout_ms) == {:ok, [2098, 2099]}
-    assert Client.read_coils(client, 1, 0, 4, timeout_ms) == {:ok, [true, false, false, true]}
-    assert Client.write_multiple_registers(client, 1, 50, [5, 6], timeout_ms) == :ok
-    assert Client.read_holding_registers(client, 1, 50, 2, timeout_ms) == {:ok, [5, 6]}
-    assert Client.write_single_coil(client, 1, 1, true, timeout_ms) == :ok
-    assert Client.read_coils(client, 1, 1, 1, timeout_ms) == {:ok, [true]}
-    assert Client.mask_write_register(client, 1, 60, 0xFF00, 0x0012, timeout_ms) == :ok
+    assert Client.read_input_registers(client, 1, 98, 2, timeout: timeout_ms) ==
+             {:ok, [2098, 2099]}
 
-    assert Client.read_write_multiple_registers(client, 1, 70, 2, 70, [9, 10], timeout_ms) ==
+    assert Client.read_coils(client, 1, 0, 4, timeout: timeout_ms) ==
+             {:ok, [true, false, false, true]}
+
+    assert Client.write_multiple_registers(client, 1, 50, [5, 6], timeout: timeout_ms) == :ok
+    assert Client.read_holding_registers(client, 1, 50, 2, timeout: timeout_ms) == {:ok, [5, 6]}
+    assert Client.write_single_coil(client, 1, 1, true, timeout: timeout_ms) == :ok
+    assert Client.read_coils(client, 1, 1, 1, timeout: timeout_ms) == {:ok, [true]}
+    assert Client.mask_write_register(client, 1, 60, 0xFF00, 0x0012, timeout: timeout_ms) == :ok
+
+    assert Client.read_write_multiple_registers(client, 1, 70, 2, 70, [9, 10],
+             timeout: timeout_ms
+           ) ==
              {:ok, [9, 10]}
 
-    assert Client.read_holding_registers(client, 1, 999, 1, timeout_ms) ==
+    assert Client.read_holding_registers(client, 1, 999, 1, timeout: timeout_ms) ==
              {:error, {:exception, :illegal_data_address}}
 
-    assert Client.read_device_identification(client, 1, :basic, timeout_ms) ==
+    assert Client.read_device_identification(client, 1, timeout: timeout_ms) ==
              {:ok, %{0 => "pymodbus", 1 => "PM", 2 => "3.15"}}
   end
 
   test "AVModbus client interoperates with a pymodbus server" do
     port = free_port()
     {:ok, _peer_port} = start_peer_server(port)
-    {:ok, client} = Client.start_link(tcp: {127, 0, 0, 1}, port: port)
-    on_exit(fn -> if Process.alive?(elem(client, 1)), do: Client.close(client) end)
+    {:ok, client} = Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, port: port)
+    on_exit(fn -> if Process.alive?(elem(client, 1)), do: Client.stop(client) end)
     check_client(client)
   end
 
@@ -148,15 +154,15 @@ defmodule AVModbus.PymodbusInteropTest do
     {:ok, server} =
       TCPServer.start_link({Memory, memory}, port: 0, address: {127, 0, 0, 1})
 
-    on_exit(fn -> if Process.alive?(elem(server, 1)), do: TCPServer.close(server) end)
+    on_exit(fn -> if Process.alive?(server), do: TCPServer.stop(server) end)
     assert run_peer_client(TCPServer.port(server)) == @expected
   end
 
   test "AVModbus client interoperates with pymodbus custom function and MEI extensions" do
     port = free_port()
     {:ok, _peer_port} = start_peer_server(port, :tcp, "extension-server")
-    {:ok, client} = Client.start_link(tcp: {127, 0, 0, 1}, port: port)
-    on_exit(fn -> if Process.alive?(elem(client, 1)), do: Client.close(client) end)
+    {:ok, client} = Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, port: port)
+    on_exit(fn -> if Process.alive?(elem(client, 1)), do: Client.stop(client) end)
     check_extension_client(client)
   end
 
@@ -164,7 +170,7 @@ defmodule AVModbus.PymodbusInteropTest do
     {:ok, server} =
       TCPServer.start_link(&extension_handler/2, port: 0, address: {127, 0, 0, 1})
 
-    on_exit(fn -> if Process.alive?(elem(server, 1)), do: TCPServer.close(server) end)
+    on_exit(fn -> if Process.alive?(server), do: TCPServer.stop(server) end)
 
     assert run_peer_client(TCPServer.port(server), :tcp, "extension-client") ==
              @extension_expected
@@ -175,10 +181,10 @@ defmodule AVModbus.PymodbusInteropTest do
       transport_mode = unquote(transport)
       {:ok, pty} = PTYTransport.start_link(python())
       {:ok, peer_port} = start_peer_server(PTYTransport.path(pty), transport_mode)
-      {:ok, client} = Client.start_link(PTYTransport, pty, mode: transport_mode, gap: 0)
+      {:ok, client} = Client.start_link(PTYTransport, pty, transport: transport_mode, gap: 0)
 
       on_exit(fn ->
-        if Process.alive?(elem(client, 1)), do: Client.close(client)
+        if Process.alive?(elem(client, 1)), do: Client.stop(client)
         if Process.alive?(pty), do: PTYTransport.close(pty)
       end)
 
@@ -196,7 +202,7 @@ defmodule AVModbus.PymodbusInteropTest do
         server_module.start_link(PTYTransport, pty, {Memory, memory}, units: [1], gap: 0)
 
       on_exit(fn ->
-        if Process.alive?(elem(server, 1)), do: server_module.close(server)
+        if Process.alive?(server), do: server_module.stop(server)
         if Process.alive?(memory), do: GenServer.stop(memory)
         if Process.alive?(pty), do: PTYTransport.close(pty)
       end)
@@ -211,10 +217,10 @@ defmodule AVModbus.PymodbusInteropTest do
       {:ok, _peer_port} =
         start_peer_server(PTYTransport.path(pty), transport_mode, "extension-server")
 
-      {:ok, client} = Client.start_link(PTYTransport, pty, mode: transport_mode, gap: 0)
+      {:ok, client} = Client.start_link(PTYTransport, pty, transport: transport_mode, gap: 0)
 
       on_exit(fn ->
-        if Process.alive?(elem(client, 1)), do: Client.close(client)
+        if Process.alive?(elem(client, 1)), do: Client.stop(client)
         if Process.alive?(pty), do: PTYTransport.close(pty)
       end)
 
@@ -230,7 +236,7 @@ defmodule AVModbus.PymodbusInteropTest do
         server_module.start_link(PTYTransport, pty, &extension_handler/2, units: [1], gap: 0)
 
       on_exit(fn ->
-        if Process.alive?(elem(server, 1)), do: server_module.close(server)
+        if Process.alive?(server), do: server_module.stop(server)
         if Process.alive?(pty), do: PTYTransport.close(pty)
       end)
 
@@ -252,7 +258,7 @@ defmodule AVModbus.PymodbusInteropTest do
         )
 
       on_exit(fn ->
-        if Process.alive?(elem(server, 1)), do: server_module.close(server)
+        if Process.alive?(server), do: server_module.stop(server)
         if Process.alive?(memory), do: GenServer.stop(memory)
         if Process.alive?(pty), do: PTYTransport.close(pty)
       end)

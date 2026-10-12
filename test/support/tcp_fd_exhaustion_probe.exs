@@ -13,7 +13,8 @@ defmodule AVModbus.TCPFDExhaustionProbe do
 
     {:ok, client} =
       Client.start_link(
-        tcp: {127, 0, 0, 1},
+        transport: :tcp,
+        host: {127, 0, 0, 1},
         port: port,
         connect_timeout: 200,
         backoff: {20, 20},
@@ -54,7 +55,8 @@ defmodule AVModbus.TCPFDExhaustionProbe do
   defp warm_up(port) do
     {:ok, client} =
       Client.start_link(
-        tcp: {127, 0, 0, 1},
+        transport: :tcp,
+        host: {127, 0, 0, 1},
         port: port,
         connect_timeout: 200,
         backoff: {20, 20},

@@ -765,11 +765,6 @@ defmodule AVModbus.PDU do
 
   def function(_request), do: {:error, :unsupported_request}
 
-  # Compatibility helper for the initial function-0x03 experiment.
-  def read_holding_registers(address, quantity) do
-    encode_request({:read_holding_registers, address, quantity})
-  end
-
   defp decode_request_data(0x01, <<address::16, quantity::16>>)
        when quantity >= 1 and quantity <= @read_bits_max,
        do: {:ok, {:read_coils, address, quantity}}

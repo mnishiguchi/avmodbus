@@ -70,17 +70,35 @@ AtomVM console と同じ UART を使うと、log と Modbus data が衝突する
 
 ## 4. UART を開く
 
-通常は `AVModbus.Client.start_link/1` が設定済み UART を開き、切断時の再接続も管理します。
+通常は `AVModbus.Client.start_link/1` が UART を開き、切断時の再接続も管理します。
+`serial:` を省略すると上の application configuration を使います。複数の UART / RS485 bus を
+使い分ける場合は、instance ごとに上書きできます。
 
 ```elixir
-{:ok, client} = AVModbus.Client.start_link(mode: :rtu, timeout: 1_000)
+{:ok, client} =
+  AVModbus.Client.start_link(
+    transport: :rtu,
+    serial: [
+      peripheral: "UART1",
+      speed: 9_600,
+      tx: 23,
+      rx: 24,
+      data_bits: 8,
+      parity: :none,
+      stop_bits: 1
+    ],
+    timeout: 1_000
+  )
 ```
+
+`gap:` / `silence:` を省略した RTU Client / Server は、この `serial:` の `speed` から frame gap と
+unknown-length frame の受信待ち時間を計算します。application configuration の値は下限として使います。
 
 application 側で UART handle を管理する場合だけ、明示的に開いて渡します。
 
 ```elixir
-{:ok, uart} = AVModbus.UART.open()
-{:ok, client} = AVModbus.Client.start_link(uart, mode: :rtu, timeout: 1_000)
+{:ok, uart} = AVModbus.UART.open(speed: 9_600, tx: 23, rx: 24)
+{:ok, client} = AVModbus.Client.start_link(uart, transport: :rtu, timeout: 1_000)
 ```
 
 最初は自動で開く一つ目の方法を推奨します。
@@ -129,7 +147,7 @@ AVModbus は読み取りにだけ明示的な retry を許可します。最初�
 ## 7. Client を終了する
 
 ```elixir
-:ok = AVModbus.Client.close(client)
+:ok = AVModbus.Client.stop(client)
 ```
 
 supervision tree から起動する方法や非同期 request は [開発者ガイド](DEVELOPMENT.md) を参照してください。
@@ -141,7 +159,8 @@ Modbus TCP では UART 設定は使いません。接続先 host と port を指
 ```elixir
 {:ok, client} =
   AVModbus.Client.start_link(
-    tcp: "192.168.1.20",
+    transport: :tcp,
+    host: "192.168.1.20",
     port: 502,
     timeout: 1_000
   )

@@ -15,7 +15,11 @@ defmodule AVModbus.MixProject do
       description: "Modbus RTU, ASCII, and TCP library designed for AtomVM",
       source_url: @source_url,
       package: package(),
-      docs: docs()
+      docs: docs(),
+      test_coverage: [
+        summary: [threshold: 80],
+        ignore_modules: [AVModbus.Test.DuplexTransport, AVModbus.Test.PTYTransport]
+      ]
     ]
   end
 

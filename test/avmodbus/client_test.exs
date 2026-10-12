@@ -107,7 +107,8 @@ defmodule AVModbus.ClientTest do
       send(owner, {:transport_read, self()})
 
       receive do
-        :release_read -> {:ok, response}
+        :release_read ->
+          if match?({:error, _reason}, response), do: response, else: {:ok, response}
       end
     end
 
@@ -130,7 +131,7 @@ defmodule AVModbus.ClientTest do
       )
     end
 
-    def open do
+    def open(_options) do
       Agent.get_and_update(__MODULE__, fn
         %{open_results: [result | rest]} = state ->
           {result, %{state | open_results: rest, open_count: state.open_count + 1}}
@@ -194,7 +195,7 @@ defmodule AVModbus.ClientTest do
     {:ok, transport} = FakeTransport.start_link(["noise" <> first, rest])
     on_exit(fn -> stop_agent(transport) end)
 
-    assert Client.transaction(FakeTransport, transport, 1, request, 100, mode: :ascii) ==
+    assert Client.transaction(FakeTransport, transport, 1, request, 100, transport: :ascii) ==
              {:ok, [42]}
 
     {:ok, request_pdu} = AVModbus.PDU.encode_request(request)
@@ -214,7 +215,7 @@ defmodule AVModbus.ClientTest do
     on_exit(fn -> stop_agent(transport) end)
 
     assert Client.transaction(FakeTransport, transport, 3, request, 100,
-             mode: :ascii,
+             transport: :ascii,
              echo: true
            ) == :ok
   end
@@ -258,28 +259,31 @@ defmodule AVModbus.ClientTest do
     {:ok, transport} = FakeTransport.start_link([])
     on_exit(fn -> stop_agent(transport) end)
 
-    assert Client.start_link(FakeTransport, transport, echo: :yes) ==
+    assert Client.start_link(FakeTransport, transport, transport: :rtu, echo: :yes) ==
              {:error, :invalid_echo_option}
 
-    assert Client.start_link(FakeTransport, transport, turnaround: 0) ==
+    assert Client.start_link(FakeTransport, transport, transport: :rtu, turnaround: 0) ==
              {:error, :invalid_turnaround_option}
 
-    assert Client.start_link(FakeTransport, transport, silence: 0) ==
+    assert Client.start_link(FakeTransport, transport, transport: :rtu, silence: 0) ==
              {:error, :invalid_silence_option}
 
-    assert Client.start_link(FakeTransport, transport, gap: -1) ==
+    assert Client.start_link(FakeTransport, transport, transport: :rtu, gap: -1) ==
              {:error, :invalid_gap_option}
 
-    assert Client.start_link(FakeTransport, transport, mode: :binary) ==
-             {:error, :invalid_mode_option}
+    assert Client.start_link(FakeTransport, transport, transport: :binary) ==
+             {:error, :invalid_transport_option}
 
-    assert Client.start_link(FakeTransport, transport, backoff: {10, 5}) ==
+    assert Client.start_link(FakeTransport, transport, transport: :rtu, backoff: {10, 5}) ==
              {:error, :invalid_backoff_option}
 
-    assert Client.start_link(FakeTransport, transport, timeout: 0) ==
+    assert Client.start_link(FakeTransport, transport, transport: :rtu, timeout: 0) ==
              {:error, :invalid_timeout_option}
 
-    assert Client.start_link(FakeTransport, transport, retry: 1) ==
+    assert Client.start_link(FakeTransport, transport, transport: :rtu, max_queue: -1) ==
+             {:error, :invalid_max_queue_option}
+
+    assert Client.start_link(FakeTransport, transport, transport: :rtu, retry: 1) ==
              {:error, {:invalid_option, {:retry, 1}}}
   end
 
@@ -332,46 +336,99 @@ defmodule AVModbus.ClientTest do
     {:ok, frame_one} = RTU.encode(1, page_one)
     {:ok, frame_two} = RTU.encode(1, page_two)
     {:ok, transport} = FakeTransport.start_link([frame_one, frame_two])
-    {:ok, client} = Client.start_link(FakeTransport, transport)
+    {:ok, client} = Client.start_link(FakeTransport, transport, transport: :rtu)
 
     on_exit(fn ->
       stop_client(client)
       stop_agent(transport)
     end)
 
-    assert Client.read_device_identification(client, 1, :basic, 100) ==
+    assert Client.read_device_identification(client, 1, timeout: 100) ==
              {:ok, %{0 => "Acme", 3 => "Model"}}
+
+    assert Client.read_device_identification(client, 1, category: :individual) ==
+             {:error, :invalid_device_id_category}
+
+    assert Client.read_device_identification(client, 1, :invalid) ==
+             {:error, :invalid_options}
 
     {:ok, first_request} = RTU.encode(1, <<0x2B, 0x0E, 0x01, 0x00>>)
     {:ok, second_request} = RTU.encode(1, <<0x2B, 0x0E, 0x01, 0x03>>)
     assert FakeTransport.writes(transport) == [first_request, second_request]
   end
 
-  test "reads a silence-delimited custom response" do
-    {:ok, response_frame} = RTU.encode(1, <<100, 9, 8, 7>>)
-    <<first::binary-size(3), rest::binary>> = response_frame
-    {:ok, transport} = FakeTransport.start_link([<<0xFF, first::binary>>, rest])
-    {:ok, client} = Client.start_link(FakeTransport, transport, silence: 1)
+  test "selects a device-identification category by option" do
+    response = <<0x2B, 0x0E, 0x02, 0x02, 0x00, 0x00, 0x01, 0x03, 0x05, "Model">>
+    {:ok, frame} = RTU.encode(1, response)
+    {:ok, transport} = FakeTransport.start_link([frame])
+    {:ok, client} = Client.start_link(FakeTransport, transport, transport: :rtu)
 
     on_exit(fn ->
       stop_client(client)
       stop_agent(transport)
     end)
 
-    assert Client.custom(client, 1, 100, <<1, 2>>, 100) == {:ok, <<9, 8, 7>>}
+    assert Client.read_device_identification(client, 1, category: :regular, timeout: 100) ==
+             {:ok, %{3 => "Model"}}
+
+    {:ok, request} = RTU.encode(1, <<0x2B, 0x0E, 0x02, 0x00>>)
+    assert FakeTransport.writes(transport) == [request]
+  end
+
+  test "reads a silence-delimited custom response" do
+    {:ok, response_frame} = RTU.encode(1, <<100, 9, 8, 7>>)
+    <<first::binary-size(3), rest::binary>> = response_frame
+    {:ok, transport} = FakeTransport.start_link([<<0xFF, first::binary>>, rest])
+
+    {:ok, client} =
+      Client.start_link(FakeTransport, transport, transport: :rtu, silence: 1)
+
+    on_exit(fn ->
+      stop_client(client)
+      stop_agent(transport)
+    end)
+
+    assert Client.custom(client, 1, 100, <<1, 2>>, timeout: 100) == {:ok, <<9, 8, 7>>}
+  end
+
+  test "rejects an unknown-length RTU response before its buffer exceeds 256 bytes" do
+    oversized = <<1, 100, :binary.copy(<<0>>, 255)::binary>>
+    {:ok, transport} = FakeTransport.start_link([oversized])
+    on_exit(fn -> stop_agent(transport) end)
+
+    assert Client.transaction(FakeTransport, transport, 1, {:custom, 100, <<1>>}, 100) ==
+             {:error, :frame_too_long}
+  end
+
+  test "derives the default RTU gap from per-instance serial speed" do
+    {:ok, transport} = FakeTransport.start_link([])
+    on_exit(fn -> stop_agent(transport) end)
+
+    assert Client.transaction(
+             FakeTransport,
+             transport,
+             1,
+             {:read_holding_registers, 0, 1},
+             100,
+             serial: [speed: 300]
+           ) == {:error, :timeout}
+
+    assert FakeTransport.writes(transport) == []
   end
 
   test "reads a silence-delimited encapsulated interface response" do
     {:ok, response_frame} = RTU.encode(1, <<0x2B, 13, 9, 8>>)
     {:ok, transport} = FakeTransport.start_link([response_frame])
-    {:ok, client} = Client.start_link(FakeTransport, transport, silence: 1)
+
+    {:ok, client} =
+      Client.start_link(FakeTransport, transport, transport: :rtu, silence: 1)
 
     on_exit(fn ->
       stop_client(client)
       stop_agent(transport)
     end)
 
-    assert Client.encapsulated_interface_transport(client, 1, 13, <<1, 2>>, 100) ==
+    assert Client.encapsulated_interface_transport(client, 1, 13, <<1, 2>>, timeout: 100) ==
              {:ok, <<9, 8>>}
   end
 
@@ -393,7 +450,13 @@ defmodule AVModbus.ClientTest do
   test "uses the managed serial default timeout unless a request overrides it" do
     {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     {:ok, transport} = DelayedTransport.start_link([{20, response}])
-    {:ok, client} = Client.start_link(DelayedTransport, transport, gap: 0, timeout: 5)
+
+    {:ok, client} =
+      Client.start_link(DelayedTransport, transport,
+        transport: :rtu,
+        gap: 0,
+        timeout: 5
+      )
 
     on_exit(fn ->
       stop_client(client)
@@ -457,7 +520,7 @@ defmodule AVModbus.ClientTest do
   test "managed client serializes concurrent transactions" do
     {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     {:ok, transport} = ConcurrentTransport.start_link(response)
-    {:ok, client} = Client.start_link(ConcurrentTransport, transport)
+    {:ok, client} = Client.start_link(ConcurrentTransport, transport, transport: :rtu)
 
     on_exit(fn ->
       stop_client(client)
@@ -466,7 +529,7 @@ defmodule AVModbus.ClientTest do
 
     requests =
       for _index <- 1..2 do
-        Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, 100) end)
+        Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, timeout: 100) end)
       end
 
     assert Enum.map(requests, &Task.await/1) == [{:ok, [42]}, {:ok, [42]}]
@@ -476,14 +539,14 @@ defmodule AVModbus.ClientTest do
   test "delivers a non-blocking request result to the caller" do
     {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     {:ok, transport} = FakeTransport.start_link([response])
-    {:ok, client} = Client.start_link(FakeTransport, transport, gap: 0)
+    {:ok, client} = Client.start_link(FakeTransport, transport, transport: :rtu, gap: 0)
 
     on_exit(fn ->
       stop_client(client)
       stop_agent(transport)
     end)
 
-    reference = Client.send_request(client, 1, {:read_holding_registers, 0, 1}, 100)
+    reference = Client.send_request(client, 1, {:read_holding_registers, 0, 1}, timeout: 100)
     assert is_reference(reference)
     assert_receive {Client, ^reference, {:ok, [42]}}, 200
   end
@@ -491,7 +554,7 @@ defmodule AVModbus.ClientTest do
   test "accepts timeout and recipient as non-blocking request options" do
     {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     {:ok, transport} = FakeTransport.start_link([response])
-    {:ok, client} = Client.start_link(FakeTransport, transport, gap: 0)
+    {:ok, client} = Client.start_link(FakeTransport, transport, transport: :rtu, gap: 0)
     caller = self()
 
     recipient =
@@ -520,28 +583,34 @@ defmodule AVModbus.ClientTest do
     {:ok, response} = ASCII.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     <<first::binary-size(4), rest::binary>> = response
     {:ok, transport} = FakeTransport.start_link([first, rest])
-    {:ok, client} = Client.start_link(FakeTransport, transport, mode: :ascii)
+    {:ok, client} = Client.start_link(FakeTransport, transport, transport: :ascii)
 
     on_exit(fn ->
       stop_client(client)
       stop_agent(transport)
     end)
 
-    reference = Client.send_request(client, 1, {:read_holding_registers, 0, 1}, 100)
+    reference = Client.send_request(client, 1, {:read_holding_registers, 0, 1}, timeout: 100)
     assert_receive {Client, ^reference, {:ok, [42]}}, 200
   end
 
   test "includes async mailbox queueing in the configured default deadline" do
     {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     {:ok, transport} = BlockingTransport.start_link(response)
-    {:ok, client} = Client.start_link(BlockingTransport, transport, gap: 0, timeout: 5)
+
+    {:ok, client} =
+      Client.start_link(BlockingTransport, transport,
+        transport: :rtu,
+        gap: 0,
+        timeout: 5
+      )
 
     on_exit(fn ->
       stop_client(client)
       stop_agent(transport)
     end)
 
-    first = Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, 100) end)
+    first = Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, timeout: 100) end)
     assert_receive :transport_write
     assert_receive {:transport_read, reader}
 
@@ -554,9 +623,102 @@ defmodule AVModbus.ClientTest do
     assert BlockingTransport.write_count(transport) == 1
   end
 
+  test "bounds the serial request queue and recovers capacity" do
+    {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
+    {:ok, transport} = BlockingTransport.start_link(response)
+
+    {:ok, client} =
+      Client.start_link(BlockingTransport, transport,
+        transport: :rtu,
+        gap: 0,
+        max_queue: 1
+      )
+
+    on_exit(fn ->
+      stop_client(client)
+      stop_agent(transport)
+    end)
+
+    active = Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, timeout: 1_000) end)
+    assert_receive :transport_write
+    assert_receive {:transport_read, active_reader}
+
+    queued = Client.send_request(client, 1, {:read_holding_registers, 0, 1}, timeout: 1_000)
+    rejected = Client.send_request(client, 1, {:read_holding_registers, 0, 1}, timeout: 1_000)
+    assert is_reference(queued)
+    assert rejected == {:error, :queue_full}
+
+    send(active_reader, :release_read)
+    assert Task.await(active) == {:ok, [42]}
+    assert_receive :transport_write
+    assert_receive {:transport_read, queued_reader}
+    send(queued_reader, :release_read)
+    assert_receive {Client, ^queued, {:ok, [42]}}, 200
+
+    recovered =
+      Client.send_request(client, 1, {:read_holding_registers, 0, 1}, timeout: 1_000)
+
+    assert_receive :transport_write
+    assert_receive {:transport_read, recovered_reader}
+    send(recovered_reader, :release_read)
+    assert_receive {Client, ^recovered, {:ok, [42]}}, 200
+  end
+
+  test "fails the bounded serial queue after a transport failure" do
+    {:ok, transport} = BlockingTransport.start_link({:error, :uart_failed})
+
+    {:ok, client} =
+      Client.start_link(BlockingTransport, transport,
+        transport: :rtu,
+        gap: 0,
+        max_queue: 1
+      )
+
+    on_exit(fn ->
+      stop_client(client)
+      stop_agent(transport)
+    end)
+
+    active = Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, timeout: 1_000) end)
+    assert_receive :transport_write
+    assert_receive {:transport_read, reader}
+
+    queued = Client.send_request(client, 1, {:read_holding_registers, 0, 1}, timeout: 1_000)
+    send(reader, :release_read)
+
+    assert Task.await(active) == {:error, :closed}
+    assert_receive {Client, ^queued, {:error, :closed}}, 200
+    assert Client.status(client) == {:disconnected, :uart_failed}
+    assert BlockingTransport.write_count(transport) == 1
+  end
+
+  test "fails active and queued serial requests when the client stops" do
+    {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
+    {:ok, transport} = BlockingTransport.start_link(response)
+
+    {:ok, client} =
+      Client.start_link(BlockingTransport, transport,
+        transport: :rtu,
+        gap: 0,
+        max_queue: 1
+      )
+
+    on_exit(fn -> stop_agent(transport) end)
+
+    active = Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, timeout: 1_000) end)
+    assert_receive :transport_write
+    assert_receive {:transport_read, _reader}
+
+    queued = Client.send_request(client, 1, {:read_holding_registers, 0, 1}, timeout: 1_000)
+    assert Client.stop(client) == :ok
+
+    assert Task.await(active) == {:error, :closed}
+    assert_receive {Client, ^queued, {:error, :closed}}, 200
+  end
+
   test "validates non-blocking request submission" do
     {:ok, transport} = FakeTransport.start_link([])
-    {:ok, client} = Client.start_link(FakeTransport, transport)
+    {:ok, client} = Client.start_link(FakeTransport, transport, transport: :rtu)
 
     on_exit(fn ->
       stop_client(client)
@@ -567,13 +729,10 @@ defmodule AVModbus.ClientTest do
              {:error, :invalid_unit_id}
 
     assert Client.send_request(client, 1, {:read_holding_registers, 0, 1}, -1) ==
-             {:error, :invalid_timeout}
+             {:error, :invalid_options}
 
     assert Client.send_request(client, 0, {:read_holding_registers, 0, 1}) ==
              {:error, :invalid_broadcast_request}
-
-    assert Client.send_request(client, 1, {:read_holding_registers, 0, 1}, 100, {1, 2}) ==
-             {:error, :invalid_recipient}
 
     assert Client.send_request(client, 1, {:read_holding_registers, 0, 1}, timeout: -1) ==
              {:error, :invalid_timeout_option}
@@ -588,18 +747,18 @@ defmodule AVModbus.ClientTest do
   test "managed client does not send a request whose queue deadline expired" do
     {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     {:ok, transport} = BlockingTransport.start_link(response)
-    {:ok, client} = Client.start_link(BlockingTransport, transport)
+    {:ok, client} = Client.start_link(BlockingTransport, transport, transport: :rtu)
 
     on_exit(fn ->
       stop_client(client)
       stop_agent(transport)
     end)
 
-    first = Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, 100) end)
+    first = Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, timeout: 100) end)
     assert_receive :transport_write
     assert_receive {:transport_read, reader}
 
-    second = Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, 5) end)
+    second = Task.async(fn -> Client.read_holding_registers(client, 1, 0, 1, timeout: 5) end)
     Process.sleep(10)
     send(reader, :release_read)
 
@@ -612,7 +771,12 @@ defmodule AVModbus.ClientTest do
     {:ok, transport_state} =
       ReopeningTransport.start_link([{:error, :device_missing}, {:ok, :reopened_uart}])
 
-    {:ok, client} = Client.start_link(ReopeningTransport, gap: 0, backoff: {20, 20})
+    {:ok, client} =
+      Client.start_link(ReopeningTransport,
+        transport: :rtu,
+        gap: 0,
+        backoff: {20, 20}
+      )
 
     assert Client.status(client) == {:disconnected, :device_missing}
     assert wait_until(fn -> Client.status(client) == :connected end)
@@ -621,9 +785,9 @@ defmodule AVModbus.ClientTest do
     {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     ReopeningTransport.push({:ok, response})
 
-    assert Client.read_holding_registers(client, 1, 0, 1, 100) == {:ok, [42]}
+    assert Client.read_holding_registers(client, 1, 0, 1, timeout: 100) == {:ok, [42]}
 
-    Client.close(client)
+    Client.stop(client)
     assert ReopeningTransport.close_count() == 1
     Agent.stop(transport_state)
   end
@@ -632,33 +796,68 @@ defmodule AVModbus.ClientTest do
     {:ok, transport_state} =
       ReopeningTransport.start_link([{:ok, :first_uart}, {:ok, :second_uart}])
 
-    {:ok, client} = Client.start_link(ReopeningTransport, gap: 0, backoff: {20, 20})
+    {:ok, client} =
+      Client.start_link(ReopeningTransport,
+        transport: :rtu,
+        gap: 0,
+        backoff: {20, 20}
+      )
+
     ReopeningTransport.push({:error, :uart_failed})
 
-    assert Client.read_holding_registers(client, 1, 0, 1, 100) == {:error, :closed}
+    assert Client.read_holding_registers(client, 1, 0, 1, timeout: 100) == {:error, :closed}
     assert Client.status(client) == {:disconnected, :uart_failed}
     assert ReopeningTransport.close_count() == 1
     assert wait_until(fn -> Client.status(client) == :connected end)
 
     {:ok, response} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     ReopeningTransport.push({:ok, response})
-    assert Client.read_holding_registers(client, 1, 0, 1, 100) == {:ok, [42]}
+    assert Client.read_holding_registers(client, 1, 0, 1, timeout: 100) == {:ok, [42]}
 
-    Client.close(client)
+    Client.stop(client)
     assert ReopeningTransport.close_count() == 2
+    Agent.stop(transport_state)
+  end
+
+  test "leaves an injected transport under caller ownership" do
+    {:ok, transport_state} = ReopeningTransport.start_link([])
+
+    {:ok, client} =
+      Client.start_link(ReopeningTransport, :injected_uart,
+        transport: :rtu,
+        gap: 0,
+        backoff: {10, 10}
+      )
+
+    ReopeningTransport.push({:error, :uart_failed})
+
+    assert Client.read_holding_registers(client, 1, 0, 1, timeout: 100) == {:error, :closed}
+    assert Client.status(client) == {:disconnected, :uart_failed}
+    Process.sleep(20)
+    assert ReopeningTransport.open_count() == 0
+    assert ReopeningTransport.close_count() == 0
+
+    Client.stop(client)
+    assert ReopeningTransport.close_count() == 0
     Agent.stop(transport_state)
   end
 
   test "keeps an owned transport connected after a response timeout" do
     {:ok, transport_state} = ReopeningTransport.start_link([{:ok, :first_uart}])
-    {:ok, client} = Client.start_link(ReopeningTransport, gap: 0, backoff: {20, 20})
 
-    assert Client.read_holding_registers(client, 1, 0, 1, 10) == {:error, :timeout}
+    {:ok, client} =
+      Client.start_link(ReopeningTransport,
+        transport: :rtu,
+        gap: 0,
+        backoff: {20, 20}
+      )
+
+    assert Client.read_holding_registers(client, 1, 0, 1, timeout: 10) == {:error, :timeout}
     assert Client.status(client) == :connected
     assert ReopeningTransport.open_count() == 1
     assert ReopeningTransport.close_count() == 0
 
-    Client.close(client)
+    Client.stop(client)
     assert ReopeningTransport.close_count() == 1
     Agent.stop(transport_state)
   end
@@ -687,14 +886,14 @@ defmodule AVModbus.ClientTest do
 
   test "managed client accepts broadcast writes" do
     {:ok, transport} = FakeTransport.start_link([])
-    {:ok, client} = Client.start_link(FakeTransport, transport)
+    {:ok, client} = Client.start_link(FakeTransport, transport, transport: :rtu)
 
     on_exit(fn ->
       stop_client(client)
       stop_agent(transport)
     end)
 
-    assert Client.write_multiple_registers(client, 0, 4, [1, 2], 500) == :ok
+    assert Client.write_multiple_registers(client, 0, 4, [1, 2], timeout: 500) == :ok
     {:ok, request_frame} = RTU.encode(0, <<0x10, 0x00, 0x04, 0x00, 0x02, 0x04, 0, 1, 0, 2>>)
 
     assert FakeTransport.writes(transport) == [request_frame]
@@ -707,15 +906,21 @@ defmodule AVModbus.ClientTest do
 
     {:ok, response_frame} = RTU.encode(1, <<0x03, 0x02, 0x00, 0x2A>>)
     {:ok, transport} = FakeTransport.start_link([broadcast_frame, response_frame])
-    {:ok, client} = Client.start_link(FakeTransport, transport, echo: true, turnaround: 10)
+
+    {:ok, client} =
+      Client.start_link(FakeTransport, transport,
+        transport: :rtu,
+        echo: true,
+        turnaround: 10
+      )
 
     on_exit(fn ->
       stop_client(client)
       stop_agent(transport)
     end)
 
-    assert Client.write_multiple_registers(client, 0, 4, [1, 2], 100) == :ok
-    assert Client.read_holding_registers(client, 1, 0, 1, 100) == {:ok, [42]}
+    assert Client.write_multiple_registers(client, 0, 4, [1, 2], timeout: 100) == :ok
+    assert Client.read_holding_registers(client, 1, 0, 1, timeout: 100) == {:ok, [42]}
     assert FakeTransport.read_count(transport) == 2
   end
 
@@ -777,7 +982,7 @@ defmodule AVModbus.ClientTest do
   end
 
   defp stop_client(client) do
-    if Process.alive?(elem(client, 1)), do: Client.close(client)
+    if Process.alive?(elem(client, 1)), do: Client.stop(client)
   catch
     :exit, _reason -> :ok
   end

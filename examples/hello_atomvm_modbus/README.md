@@ -273,6 +273,7 @@ baseline と budget の更新方針は [`../../docs/ARTIFACT_SIZE.md`](../../doc
 | `ATOMVM_UART_DATA_BITS` | `8` | data bits |
 | `ATOMVM_UART_PARITY` | `none` | `none` / `even` / `odd` |
 | `ATOMVM_UART_STOP_BITS` | `1` | stop bits |
+| `ATOMVM_UART_RX_IDLE_TIMEOUT_MS` | `20` | AtomVM UART の隣接 chunk をまとめる idle timeout |
 | `MODBUS_ECHO` | `false` | adapter echo を除去するか |
 | `MODBUS_RTU_GAP_MS` | `0` | 通常 RTU client / server の送信前 gap。`0` は baud rate から算出 |
 | `MODBUS_SILENCE_MS` | `20` | unknown-length frame の silent interval |
@@ -360,9 +361,10 @@ AVModbus の resource leak を示すものではありません。hard-limit 付
 
 ## 実 RS485 workflow probe
 
-通常の RTU server image を一方の board に flash した後、もう一方に compile-time workflow probe を
-flash すると、実 RS485 bus 上で registers、coils、mask write、read/write multiple、file record、FIFO、
-diagnostics、device identification、broadcast と exception response を連続確認できます。
+通常の RTU または ASCII server image を一方の board に flash した後、もう一方に同じ mode の
+compile-time workflow probe を flash すると、実 RS485 bus 上で registers、coils、mask write、
+read/write multiple、file record、FIFO、diagnostics、device identification、broadcast と exception
+response を連続確認できます。
 
 ```sh
 # Server board
@@ -379,12 +381,23 @@ MODBUS_WORKFLOW_PROBE=true MIX_ENV=prod \
 mix atomvm.esp32.monitor --port /dev/ttyACM_CLIENT
 ```
 
+Modbus ASCII 7E1 では、Server と Client/probe の build / flash command すべてに次の環境変数を追加します。
+
+```sh
+MODBUS_MODE=ascii ATOMVM_UART_DATA_BITS=7 ATOMVM_UART_PARITY=even
+```
+
+XIAO ESP32-C5 と HW-519 の組み合わせでは、RTU 8N1 に加えて ASCII 7E1 でもこの workflow を実機確認済みです。
+
 probe は最初に write-single response が request と同一 frame になる性質を使い、`echo: true` で
 local adapter echo の有無を分類します。その後は `echo: false` で 20-step workflow を 3 cycle
-実行します。transport wrapper が response read と次の UART write の時刻を記録し、configured RTU gap
+実行します。transport wrapper が response read と次の UART write の時刻を記録し、configured serial gap
 以上であることを確認します。broadcast write の所要時間も configured turnaround 以上で、その直後の
 read が更新値を返す場合だけ成功です。最後の `modbus_workflow result=ok` line に request 数と timing
 summary を出力します。
+
+ASCII 7E1、9,600 baud、20 ms gap では 3 cycle / 60 request を 2 回連続で完走し、最小の
+response-to-next-write は 36 ms、100 ms broadcast turnaround の実測値は 130 ms でした。
 
 この計測は AtomVM UART API 境界の millisecond timestamp であり、RS485 waveform の oscilloscope / logic
 analyzer 計測を置き換えるものではありません。`MODBUS_RESOURCE_PROBE` と同時には有効にしないでください。
@@ -397,9 +410,28 @@ request がすべて成功しました。20 ms run の UART API 境界で観測�
 probe の既定値は、この hardware profile で安定した 20 ms としています。
 
 同じ margin を通常 application に適用する場合は、client / server image の build と flash の両方で
-`MODBUS_RTU_GAP_MS=20` を指定します。この値は RTU request / response の送信前 delay だけを上書きし、
+`MODBUS_RTU_GAP_MS=20` を指定します。この値は RTU request / response の送信前 delay の下限となり、
 unknown-length frame を確定する `MODBUS_SILENCE_MS` には影響しません。個別の injected transport 利用時は
 従来どおり managed client / server の `gap:` option で上書きできます。
+
+`ATOMVM_UART_RX_IDLE_TIMEOUT_MS` は、AtomVM UART の read 呼び出し間で byte を失わないために隣接 chunk を
+drain する UART 固有の時間です。既定 20 ms はこの ESP32-C5 / AtomVM 0.7 構成で検証済みです。
+Modbus の `gap` / `silence` とは別の設定であり、短縮する場合は長い request と fragmented response を含む
+workflow probe を再実行してください。
+
+2026-10-13 に RTU 8N1、20 ms transmit gap、3 cycle / 60 request で比較した結果です。所要時間は
+Client API の end-to-end 値であり、RX idle timeout だけの microbenchmark ではありません。
+
+| Baud rate | RX idle | 結果 | Request min / avg / max |
+| ---: | ---: | --- | ---: |
+| 9,600 | 20 ms | 60 / 60 成功 | 136 / 179 / 233 ms |
+| 9,600 | 10 ms | 5 request 目で timeout | 途中終了 |
+| 115,200 | 20 ms | 60 / 60 成功 | 134 / 144 / 164 ms |
+
+10 ms では長い `write_multiple_registers` request への response が得られませんでした。このため、現在は
+低遅延化より frame の完全性を優先して 20 ms を既定値とします。workflow の最終行は `speed`、
+`rx_idle_timeout_ms`、request の min / average / max を出力するため、別の board / UART driver でも同じ
+判定基準で比較できます。console の記録には `tio --baudrate 115200 /dev/ttyACM_CLIENT` も使用できます。
 
 ## Firmware download のトラブルシューティング
 

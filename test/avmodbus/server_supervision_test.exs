@@ -57,7 +57,7 @@ defmodule AVModbus.ServerSupervisionTest do
   test "serial servers accept raw pids and registered names" do
     handler = fn _unit_id, _request -> {:error, {:exception, :illegal_function}} end
 
-    {:ok, {RTUServer, rtu}} =
+    {:ok, rtu} =
       RTUServer.start_link(FakeTransport, :rtu_uart, handler,
         units: [1],
         silence: 1,
@@ -70,7 +70,7 @@ defmodule AVModbus.ServerSupervisionTest do
     assert RTUServer.stop(@rtu_name) == :ok
     refute Process.alive?(rtu)
 
-    {:ok, {ASCIIServer, ascii}} =
+    {:ok, ascii} =
       ASCIIServer.start_link(FakeTransport, :ascii_uart, handler,
         units: [1],
         silence: 1,

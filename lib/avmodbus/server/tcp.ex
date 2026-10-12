@@ -21,7 +21,6 @@ defmodule AVModbus.Server.TCP do
   @default_connections 16
 
   @type server :: pid() | atom()
-  @type t :: {__MODULE__, server()}
   @type option ::
           {:port, 0..65_535}
           | {:address, :inet.ip_address()}
@@ -43,16 +42,15 @@ defmodule AVModbus.Server.TCP do
 
   @doc false
   def start_supervised(options) when is_list(options) do
-    with {:ok, handler, server_options} <- take_handler(options),
-         {:ok, {__MODULE__, pid}} <- start_link(handler, server_options) do
-      {:ok, pid}
+    with {:ok, handler, server_options} <- take_handler(options) do
+      start_link(handler, server_options)
     end
   end
 
   def start_supervised(_options), do: {:error, :invalid_options}
 
   @doc "TCP port を listen して server を起動します。"
-  @spec start_link(Server.handler(), [option()]) :: {:ok, t()} | {:error, term()}
+  @spec start_link(Server.handler(), [option()]) :: {:ok, pid()} | {:error, term()}
   def start_link(handler, options \\ [])
 
   def start_link(handler, options) when is_list(options) do
@@ -65,28 +63,15 @@ defmodule AVModbus.Server.TCP do
   def start_link(_handler, _options), do: {:error, :invalid_options}
 
   @doc "server が listen している port を返します。port `0` で起動した場合にも利用できます。"
-  @spec port(t() | server()) :: 0..65_535
-  def port({__MODULE__, server}) when is_pid(server) or is_atom(server),
-    do: :gen_server.call(server, :port)
-
+  @spec port(server()) :: 0..65_535
   def port(server) when is_pid(server) or is_atom(server), do: :gen_server.call(server, :port)
 
-  @doc "listener と全 client connection を閉じます。"
-  @spec close(t() | server()) :: :ok
-  def close({__MODULE__, server}) when is_pid(server) or is_atom(server),
-    do: :gen_server.stop(server)
-
-  def close(server) when is_pid(server) or is_atom(server), do: :gen_server.stop(server)
-
   @doc "listener と connection を閉じて server を停止します。"
-  @spec stop(t() | server()) :: :ok
-  def stop(server), do: close(server)
+  @spec stop(server()) :: :ok
+  def stop(server), do: :gen_server.stop(server)
 
   @doc "listener state と現在の connection 数を返します。"
-  @spec status(t() | server()) :: {:listening, non_neg_integer()}
-  def status({__MODULE__, server}) when is_pid(server) or is_atom(server),
-    do: :gen_server.call(server, :status)
-
+  @spec status(server()) :: {:listening, non_neg_integer()}
   def status(server) when is_pid(server) or is_atom(server),
     do: :gen_server.call(server, :status)
 
@@ -236,7 +221,7 @@ defmodule AVModbus.Server.TCP do
       {:ok, pid} ->
         case :gen_server.call(pid, :startup_result) do
           :ok ->
-            {:ok, {__MODULE__, pid}}
+            {:ok, pid}
 
           {:error, _reason} = error ->
             :gen_server.stop(pid)

@@ -21,4 +21,32 @@ jobs:
 
       - run: mix deps.get
       - run: mix format --check-formatted
-      - run: mix test
+      - run: mix test --cover
+
+      - name: Fetch AtomVM example dependencies
+        working-directory: examples/hello_atomvm_modbus
+        run: mix deps.get
+
+      - name: Check AtomVM compatibility
+        working-directory: examples/hello_atomvm_modbus
+        run: |
+          MIX_ENV=prod mix clean
+          MIX_ENV=prod mix atomvm.check
+
+      - name: Check AtomVM workflow probe
+        working-directory: examples/hello_atomvm_modbus
+        run: |
+          MIX_ENV=prod mix clean
+          MODBUS_WORKFLOW_PROBE=true MIX_ENV=prod mix atomvm.check
+
+      - name: Check AtomVM resource probe
+        working-directory: examples/hello_atomvm_modbus
+        run: |
+          MIX_ENV=prod mix clean
+          MODBUS_RESOURCE_PROBE=true MIX_ENV=prod mix atomvm.check
+
+      - name: Build and size-check AtomVM package
+        working-directory: examples/hello_atomvm_modbus
+        run: |
+          MIX_ENV=prod mix clean
+          MIX_ENV=prod mix atomvm.size
