@@ -215,12 +215,24 @@ RTU の silent interval を必要とする ambiguous / corrupted input と、kno
 TCP server は listener と connection admission を managed process で所有し、各 connection を独立した process で処理します。
 
 - 同じ connection の request は wire order で応答し、異なる connection は並行処理
-- active binary socket の ownership transfer 中に届いた message も connection process に転送
+- active binary socket の owner は protocol worker と分離した broker とし、slow handler 中も受信 message を処理
+- worker へ未配送の broker binary は connection ごとの `max_buffer`（既定 2,048 bytes）で制限し、
+  単一受信 chunk または蓄積 buffer の超過時は connection を閉じる
+- active socket mailbox、worker が保持する現在の chunk / frame remainder、OS / runtime socket buffer は
+  `max_buffer` に含めず、connection 全体の厳密な memory 上限とは扱わない
+- broker は実行中の isolated handler も所有し、overflow、切断、eviction、server stop で worker とともに
+  `:kill` で停止する。handler が `trap_exit` を有効にしても connection より長く残らない
+- listener は handler 実行前の ownership handshake で fallback owner となり、broker が外部から
+  `:kill` された場合も登録済み handler を停止する
+- ownership transfer 中に届いた socket message も broker へ転送し、handoff failure 時は admitted broker も停止
+- eviction / shutdown は全 broker で共有する 1 秒の graceful deadline と 100 ms の forced-stop deadline を持つ
 - connection 上限では、最も多く connection を保持する address group の最古 connection を優先して evict
 - address / network prefix allowlist、request 完了基準の idle timeout を提供
 - invalid MBAP length では connection を閉じ、foreign protocol frame は破棄
 - authorization、device identification、handler timeout は serial server と同じ core policy を使用
-- 複数 managed client、connection ごとの pipelined request、処理時間の異なる handler を組み合わせた load test で connection 間の並行性と result correlation を検証
+- pre-handoff shutdown / eviction、forced broker death、停止不能 broker、slow handler 中の receive overflow と
+  反復 recovery、connection ごとの pipelined request、複数 managed client を組み合わせた load test で
+  broker buffer 上限、wire order、lifecycle、connection 間の並行性と result correlation を検証
 
 ## メモリハンドラー
 

@@ -78,6 +78,116 @@ defmodule AVModbus.TCPServerLoadTest do
     assert maximum >= 2
   end
 
+  test "samples broker mailbox and heap during a slow-handler TCP burst" do
+    parent = self()
+
+    handler = fn _unit_id, {:read_holding_registers, address, 1} ->
+      if address == 0 do
+        send(parent, {:resource_handler, self()})
+        receive do: (:release -> :ok)
+      end
+
+      {:ok, [address]}
+    end
+
+    {:ok, server} =
+      TCPServer.start_link(handler,
+        address: {127, 0, 0, 1},
+        port: 0,
+        max_buffer: 2_048,
+        handler_timeout: 3_000
+      )
+
+    on_exit(fn -> stop_server(server) end)
+
+    {:ok, socket} =
+      :gen_tcp.connect({127, 0, 0, 1}, TCPServer.port(server), [:binary, active: false])
+
+    on_exit(fn -> :gen_tcp.close(socket) end)
+    {:ok, first} = AVModbus.TCP.encode(1, 1, <<3, 0::16, 1::16>>)
+    :ok = :gen_tcp.send(socket, first)
+    assert_receive {:resource_handler, handler_process}
+
+    [broker] = Map.keys(:sys.get_state(server).clients)
+    {:links, links} = Process.info(broker, :links)
+    [worker] = Enum.filter(links, fn link -> is_pid(link) and link != handler_process end)
+
+    sampler =
+      spawn_link(fn ->
+        sample_connection(broker, worker, parent, %{
+          samples: 0,
+          broker: {0, 0, 0},
+          worker: {0, 0, 0}
+        })
+      end)
+
+    # 160 12-byte ADUs approach the 2,048-byte broker bound while the worker
+    # is blocked in the first handler.
+    for address <- 1..160 do
+      {:ok, frame} = AVModbus.TCP.encode(address + 1, 1, <<3, address::16, 1::16>>)
+      :ok = :gen_tcp.send(socket, frame)
+      Process.sleep(1)
+    end
+
+    send(sampler, :finish)
+    assert_receive {:connection_peak, samples, broker_peak, worker_peak}, 1_000
+    assert samples > 0
+    assert {broker_mailbox, broker_memory, broker_heap} = broker_peak
+    assert {worker_mailbox, worker_memory, worker_heap} = worker_peak
+    assert broker_mailbox >= 0
+    assert worker_mailbox >= 0
+    assert broker_memory > 0
+    assert worker_memory > 0
+    assert broker_heap > 0
+    assert worker_heap > 0
+
+    if System.get_env("AVMODBUS_PEAK_REPORT") do
+      IO.puts(
+        "tcp_receive_peak samples=#{samples} " <>
+          "broker_mailbox=#{broker_mailbox} broker_memory_bytes=#{broker_memory} " <>
+          "broker_heap_words=#{broker_heap} worker_mailbox=#{worker_mailbox} " <>
+          "worker_memory_bytes=#{worker_memory} worker_heap_words=#{worker_heap}"
+      )
+    end
+
+    send(handler_process, :release)
+
+    for transaction_id <- 1..161 do
+      {:ok, <<^transaction_id::16, 0::16, 5::16, 1, 3, 2, value::16>>} =
+        :gen_tcp.recv(socket, 11, 1_000)
+
+      assert value == transaction_id - 1
+    end
+  end
+
+  defp sample_connection(broker, worker, owner, peaks) do
+    next = %{
+      samples: peaks.samples + 1,
+      broker: process_peak(broker, peaks.broker),
+      worker: process_peak(worker, peaks.worker)
+    }
+
+    receive do
+      :finish -> send(owner, {:connection_peak, next.samples, next.broker, next.worker})
+    after
+      1 -> sample_connection(broker, worker, owner, next)
+    end
+  end
+
+  defp process_peak(process, {mailbox_peak, memory_peak, heap_peak}) do
+    case {
+      Process.info(process, :message_queue_len),
+      Process.info(process, :memory),
+      Process.info(process, :heap_size)
+    } do
+      {{:message_queue_len, mailbox}, {:memory, memory}, {:heap_size, heap}} ->
+        {max(mailbox_peak, mailbox), max(memory_peak, memory), max(heap_peak, heap)}
+
+      _ ->
+        {mailbox_peak, memory_peak, heap_peak}
+    end
+  end
+
   defp enter_handler(meter) do
     Agent.update(meter, fn state ->
       active = state.active + 1

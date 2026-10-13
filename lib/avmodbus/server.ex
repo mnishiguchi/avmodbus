@@ -111,10 +111,13 @@ defmodule AVModbus.Server do
       when is_integer(unit_id) and unit_id >= 0 and unit_id <= 255 and is_map(policy) do
     case PDU.decode_request(pdu) do
       {:ok, request} ->
+        handler_owner = Map.get(policy, :__lifecycle_owner__)
+
         result =
           timed(
             fn -> policy_result(handler, unit_id, request, policy) end,
-            handler_timeout
+            handler_timeout,
+            handler_owner
           )
 
         encode_result(request, result)
@@ -190,22 +193,79 @@ defmodule AVModbus.Server do
     timed(fn -> invoke_handler(handler, unit_id, request) end, handler_timeout)
   end
 
-  defp timed(fun, handler_timeout)
+  defp timed(fun, handler_timeout), do: timed(fun, handler_timeout, nil)
+
+  defp timed(fun, handler_timeout, handler_owner)
        when handler_timeout == :infinity or
               (is_integer(handler_timeout) and handler_timeout > 0) do
     caller = self()
     reply_ref = make_ref()
 
     {pid, monitor_ref} =
-      :erlang.spawn_monitor(fn ->
-        result = safe_call(fun)
-        send(caller, {reply_ref, result})
-      end)
+      if is_pid(handler_owner) do
+        :erlang.spawn_monitor(fn -> owned_call(caller, reply_ref, fun) end)
+      else
+        :erlang.spawn_monitor(fn -> run_call(caller, reply_ref, fun) end)
+      end
 
-    await(pid, monitor_ref, reply_ref, handler_timeout)
+    case claim_handler(handler_owner, pid) do
+      :ok ->
+        if is_pid(handler_owner), do: send(pid, {reply_ref, :run})
+        result = await(pid, monitor_ref, reply_ref, handler_timeout)
+        release_handler(handler_owner, pid)
+        result
+
+      {:error, :closed} ->
+        :erlang.exit(pid, :kill)
+        :erlang.demonitor(monitor_ref, [:flush])
+        {:error, {:exception, :server_device_failure}}
+    end
   end
 
-  defp timed(_fun, _handler_timeout), do: {:error, {:exception, :server_device_failure}}
+  defp timed(_fun, _handler_timeout, _handler_owner),
+    do: {:error, {:exception, :server_device_failure}}
+
+  defp run_call(caller, reply_ref, fun) do
+    result = safe_call(fun)
+    send(caller, {reply_ref, result})
+  end
+
+  defp owned_call(caller, reply_ref, fun) do
+    caller_monitor = :erlang.monitor(:process, caller)
+
+    receive do
+      {^reply_ref, :run} ->
+        :erlang.demonitor(caller_monitor, [:flush])
+        run_call(caller, reply_ref, fun)
+
+      {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
+        :ok
+    end
+  end
+
+  defp claim_handler(nil, _pid), do: :ok
+
+  defp claim_handler(owner, pid) when is_pid(owner) do
+    reference = make_ref()
+    owner_monitor = :erlang.monitor(:process, owner)
+    send(owner, {__MODULE__, :claim_handler, self(), pid, reference})
+
+    receive do
+      {__MODULE__, ^reference, result} ->
+        :erlang.demonitor(owner_monitor, [:flush])
+        result
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+        {:error, :closed}
+    end
+  end
+
+  defp claim_handler(_owner, _pid), do: {:error, :closed}
+
+  defp release_handler(owner, pid) when is_pid(owner),
+    do: send(owner, {__MODULE__, :release_handler, self(), pid})
+
+  defp release_handler(_owner, _pid), do: :ok
 
   defp await(pid, monitor_ref, reply_ref, :infinity) do
     receive do

@@ -8,6 +8,9 @@
 - AtomVM UART adapter 上で通信状態を管理する RTU / ASCII Client / Server
 - transaction の並行処理と再接続方針を備えた Modbus TCP Client
 - connection の分離と受け入れ数の制限を備えた Modbus TCP Server
+- slow handler 中も受信を継続し、connection ごとの未処理 data を制限する TCP receive broker
+- overflow、切断、eviction、server stop 時に `trap_exit` の有無によらず実行中の TCP handler も停止する lifecycle ownership
+- forced broker death 時の handler cleanup、handoff failure cleanup、共有 deadline による bounded TCP shutdown
 - Modbus TCP Client / Server での IPv4 / IPv6 literal 対応
 - raw PID と registered name API を利用できる OTP supervision 対応 Client
 - raw PID と `stop/1` に lifecycle API を統一した OTP supervision 対応の RTU / ASCII / TCP Server
@@ -41,9 +44,11 @@
 - Linux file descriptor 枯渇と復旧を確認する明示指定式 integration test
 - sparse in-memory data model、diagnostics、broadcast、authorization、device identification
 - Modbus V1.1b3 application example と malformed frame の conformance vector
+- RTU decode で予約済み Unit ID `248..255` を拒否する serial address validation
 - property test と、登録した custom function / generic MEI PDU を含む
   pymodbus TCP / RTU / ASCII 双方向 interoperability test
 - libmodbus TCP / RTU 双方向 interoperability test
+- pinned pymodbus と system libmodbus peer を実行する独立した CI interoperability job
 
 対象 runtime は AtomVM の `release-0.7` branch です。実機検証の baseline は
 `v0.7.0-beta.0+git.8d3e051` で、runtime dependency はありません。

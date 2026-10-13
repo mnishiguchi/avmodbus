@@ -56,6 +56,30 @@ free heap delta は managed process heap だけでなく、role module の load�
 toolchain、firmware、board、compile-time configuration、transport mode が変わる場合は別 baseline として
 記録します。diagnostic probe build は通常の artifact-size budget 対象には含めません。
 
+## 2026-10-13 TCP loopback 接続数比較
+
+official AtomVM `v0.7.0-beta.0` image 上で、同一 board 内の TCP Server と managed Client を loopback 接続し、
+network stack の warm-up 後に 1..4 connections を各 3 cycle 計測しました。各 Client は idle 接続後、
+3 request を受け付け、4 件目の `:queue_full` も確認します。
+
+| Connections | Process 数（前 / idle / active / 後） | Idle 時の free heap 減少 | Active snapshot 時の free heap 減少 |
+| ---: | --- | ---: | ---: |
+| 1 | `4 / 13 / 21 / 4` | 6,396–6,420 B | 11,508–13,060 B |
+| 2 | `4 / 19 / 35 / 4` | 10,568–10,572 B | 22,280–23,784 B |
+| 3 | `4 / 23 / 48 / 4` | 13,656–13,704 B | 32,608–34,176 B |
+| 4 | `4 / 28 / 61 / 4` | 16,760–17,484 B | 40,116–44,040 B |
+
+これは Server connection 単体の heap overhead ではなく、listener、managed Clients、accepted connections、
+socket runtime state を含む deployed probe 全体の差です。active snapshot は request 投入直後の一点計測で、
+測定期間中の厳密な peak ではありません。全 12 measured cycles で process 数は 4 に戻り、free heap は
+probe の 32 KiB recovery bound 内に回復しました。2 connections 以上では AtomVM socket driver の
+`event_queue` warning も観測したため、4 は確認済みの最大値であり、一般的な安全上限や保証値ではありません。
+詳細は [TCP リソース上限レポート](ATOMVM_TCP_HARD_LIMIT.md) を参照してください。
+
+2026-10-14 の lifecycle hardening 後にも 4 connections を 3 cycle 再実行し、process 数は
+`4 / 28 / 61 / 4` に回復しました。idle 時の free heap 減少は 16,928–17,560 B、active snapshot は
+41,144–43,368 B で、前日の測定と同程度でした。
+
 ## 長時間検証
 
 startup 間の差分ではなく稼働中の推移を観測する場合は、example の

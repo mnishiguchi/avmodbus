@@ -50,3 +50,36 @@ jobs:
         run: |
           MIX_ENV=prod mix clean
           MIX_ENV=prod mix atomvm.size
+
+  interoperability:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install independent Modbus peers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmodbus-dev pkg-config gcc
+          python -m venv .venv
+          .venv/bin/python -m pip install 'pymodbus==3.15.0' pyserial
+
+      - run: mix deps.get
+
+      - name: Verify TCP, RTU, and ASCII interoperability
+        env:
+          LIBMODBUS_INTEROP: '1'
+          PYMODBUS_PYTHON: ${{ github.workspace }}/.venv/bin/python
+        run: |
+          mix test --include interop --include libmodbus \
+            test/avmodbus/pymodbus_interop_test.exs \
+            test/avmodbus/libmodbus_interop_test.exs

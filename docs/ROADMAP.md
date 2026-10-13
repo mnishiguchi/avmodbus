@@ -33,8 +33,19 @@ Hex package としての公開は完了条件に含めません。
 ### Phase 2: compatibility と bounded resource
 
 - [x] Modbus ASCII で予約済み Unit ID `248..255` を拒否する
+- [x] Modbus RTU decode でも予約済み Unit ID `248..255` を拒否し、encode / typespec と一致させる
 - [x] CI で AtomVM compatibility check と `.avm` package 作成を実行する
 - [x] Serial Client の async request queue に上限と overflow policy を設ける
+- [x] TCP Server の socket owner を slow handler から分離し、connection ごとの receive buffer を制限する
+- [x] slow handler、pipelined request、receive overflow の deterministic host test を追加する
+- [x] TCP connection 終了時に実行中の isolated handler を停止し、orphan process を残さない
+- [x] `trap_exit` handler の切断、overflow、eviction、server stop と反復 overload recovery を回帰テストする
+- [x] TCP `max_buffer` が broker の未配送 data だけを制限することを明文化する
+- [x] ESP32-C5 で 1..4 loopback connections の idle / active resource snapshot と cleanup を比較する
+- [x] socket handoff 前の shutdown / eviction と handoff failure cleanup を回帰テストする
+- [x] forced broker death 時も listener が `trap_exit` handler を cleanup する ownership を固定する
+- [x] 応答不能な複数 broker に対する shutdown / eviction の待機時間を共有 deadline で制限する
+- [x] slow-handler burst 中の broker / worker mailbox、memory、heap の sampled maximum を host で計測する
 - [x] queue と recovery の変更後に property / stress / soak test を再実行する
 
 ### Phase 3: release 前の確認
@@ -43,6 +54,7 @@ Hex package としての公開は完了条件に含めません。
 - [x] official AtomVM `v0.7.0-beta.0` (`8d3e051`) で compile、package、TCP resource probe、
   実 RS485 smoke test を再実行する
 - [x] RX idle timeout と baud rate の latency を実機で比較し、20 ms の安定性を再確認する
+- [x] pinned pymodbus と system libmodbus の interoperability test を独立した CI job にする
 - [x] codec / allocation の最適化は現在の実機・soak test に bottleneck の証拠がないため見送る
 
 module 分割は目的にせず、責務の変更や決定的な test の追加に必要な場合だけ行います。

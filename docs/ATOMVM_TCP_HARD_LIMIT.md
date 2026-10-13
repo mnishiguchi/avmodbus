@@ -70,18 +70,32 @@ mix atomvm.esp32.monitor --port /dev/ttyACM0
 
 既定の probe は network stack を warm-up してから、4 managed Client の cycle を 3 回実行します。
 各 Client は 3 request を受け付け、1 request は想定どおり `:queue_full` になります。
-すべての cycle で process 数は 4 に戻りました。
+2026-10-13 に同じ image で接続数を 1 から 4 まで変え、各条件を 3 cycle 実行しました。
 
-| cycle | process 数（前 / peak / 後） | free heap bytes（前 / peak / 後） |
-| --- | --- | --- |
-| 1 | `4 / 27 / 4` | `136088 / 116784 / 135532` |
-| 2 | `4 / 27 / 4` | `135368 / 116072 / 134808` |
-| 3 | `4 / 27 / 4` | `134652 / 116028 / 134772` |
+| Connections | Process 数（前 / idle / active / 後） | Idle 時の free heap 減少 | Active snapshot 時の free heap 減少 | Cleanup 後の差 |
+| ---: | --- | ---: | ---: | ---: |
+| 1 | `4 / 13 / 21 / 4` | 6,396–6,420 B | 11,508–13,060 B | `-24..-8 B` |
+| 2 | `4 / 19 / 35 / 4` | 10,568–10,572 B | 22,280–23,784 B | `-180..-160 B` |
+| 3 | `4 / 23 / 48 / 4` | 13,656–13,704 B | 32,608–34,176 B | `-344..-340 B` |
+| 4 | `4 / 28 / 61 / 4` | 16,760–17,484 B | 40,116–44,040 B | `-508..+188 B` |
 
-warm-up 後の最大 free block は 86,016 bytes を維持し、probe は
+free heap の減少量は各 cycle の `before` を基準にしています。idle は loopback managed Client、Server、
+accepted connection をすべて含み、Server connection 単体の費用ではありません。active は request 投入直後の
+一点計測であり、連続観測した最大値ではありません。4 connections の active snapshot で最大 free block は
+69,632–73,728 bytes でした。すべての条件で process 数は 4 に戻り、probe は
 `modbus_resource_probe result=ok cycles=3` で完了しました。
 
-これが対照条件です。負荷がある状態でも、AVModbus の bounded queue、request 完了、process cleanup、
+2 connections 以上では cleanup 付近で ESP32 socket driver が `socket: failed to enqueue: 0 to event_queue.`
+を出力しました。これは既知の AtomVM platform warning で、この測定では request 完了、process cleanup、
+許容範囲内の heap recovery を妨げませんでした。ただし、警告がないことを保証する結果ではありません。
+
+2026-10-14 に handler ownership handshake と bounded shutdown を追加した build でも、4 connections を
+3 measured cycle 再実行しました。process 数は各回 `4 / 28 / 61 / 4`、idle 時の free heap 減少は
+16,928–17,560 bytes、active snapshot は 41,144–43,368 bytes、cleanup 後の差は `-532..+148 bytes` で、
+全 cycle が `result=ok` でした。active 時の最大 free block は 65,536–69,632 bytes です。
+`event_queue` warning は同様に発生しました。
+
+これが対照条件です。確認した負荷の範囲では、AVModbus の bounded queue、request 完了、process cleanup、
 heap recovery がすべて機能しています。
 
 production 用に残した probe は、`MODBUS_RESOURCE_PROBE_CONNECTIONS` が `1..4` の範囲外、または

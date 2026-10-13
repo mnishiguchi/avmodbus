@@ -28,7 +28,10 @@ defmodule AVModbus.RTU do
     if CRC16.valid?(frame) do
       pdu_size = byte_size(frame) - 3
       <<unit_id, pdu::binary-size(pdu_size), _crc::binary-size(2)>> = frame
-      {:ok, unit_id, pdu}
+
+      if unit_id <= 247,
+        do: {:ok, unit_id, pdu},
+        else: {:error, :invalid_unit_id}
     else
       {:error, :invalid_crc}
     end

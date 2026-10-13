@@ -114,6 +114,353 @@ defmodule AVModbus.TCPServerTest do
     assert receive_frame(slow) == {:ok, 1, 1, <<3, 2, 0, 10>>}
   end
 
+  test "drains socket messages while preserving pipelined request order" do
+    parent = self()
+
+    handler = fn _unit_id, {:read_holding_registers, address, 1} ->
+      if address == 0 do
+        send(parent, {:slow_handler, self()})
+        receive do: (:release -> :ok)
+      end
+
+      {:ok, [address]}
+    end
+
+    server = start_server(handler, max_buffer: 2_048, handler_timeout: 1_000)
+    socket = connect(server)
+
+    frames = for transaction_id <- 1..32, do: read_frame(transaction_id, transaction_id - 1)
+    :ok = :gen_tcp.send(socket, frames)
+
+    assert_receive {:slow_handler, handler_process}
+    [connection] = Map.keys(:sys.get_state(server).clients)
+    Process.sleep(20)
+    assert {:message_queue_len, queued} = Process.info(connection, :message_queue_len)
+    assert queued <= 1
+
+    send(handler_process, :release)
+
+    for transaction_id <- 1..32 do
+      address = transaction_id - 1
+      assert receive_frame(socket) == {:ok, transaction_id, 1, <<3, 2, address::16>>}
+    end
+  end
+
+  test "closes a connection whose receive buffer exceeds its bound" do
+    parent = self()
+
+    handler = fn _unit_id, {:read_holding_registers, 0, 1} ->
+      Process.flag(:trap_exit, true)
+      send(parent, {:blocked_handler, self()})
+      receive do: (:release -> {:ok, [0]})
+    end
+
+    server = start_server(handler, max_buffer: 260, handler_timeout: :infinity)
+    socket = connect(server)
+    :ok = :gen_tcp.send(socket, read_frame(1, 0))
+    assert_receive {:blocked_handler, handler_process}
+    handler_monitor = Process.monitor(handler_process)
+
+    burst = for transaction_id <- 2..80, do: read_frame(transaction_id, 0)
+    :ok = :gen_tcp.send(socket, burst)
+
+    assert :gen_tcp.recv(socket, 0, 1_000) == {:error, :closed}
+    assert eventually(fn -> TCPServer.status(server) == {:listening, 0} end)
+    assert_receive {:DOWN, ^handler_monitor, :process, ^handler_process, :killed}
+  end
+
+  test "stops an active handler with its connection" do
+    parent = self()
+
+    handler = fn _unit_id, {:read_holding_registers, 0, 1} ->
+      Process.flag(:trap_exit, true)
+      send(parent, {:active_handler, self()})
+      receive do: (:never -> {:ok, [0]})
+    end
+
+    server = start_server(handler, handler_timeout: :infinity)
+    socket = connect(server)
+    :ok = :gen_tcp.send(socket, read_frame(1, 0))
+    assert_receive {:active_handler, handler_process}
+    handler_monitor = Process.monitor(handler_process)
+
+    :ok = TCPServer.stop(server)
+
+    assert_receive {:DOWN, ^handler_monitor, :process, ^handler_process, :killed}
+    assert :gen_tcp.recv(socket, 0, 1_000) == {:error, :closed}
+  end
+
+  test "stops a trapping handler when its client disconnects" do
+    parent = self()
+
+    handler = fn _unit_id, {:read_holding_registers, 0, 1} ->
+      Process.flag(:trap_exit, true)
+      send(parent, {:disconnect_handler, self()})
+      receive do: (:never -> {:ok, [0]})
+    end
+
+    server = start_server(handler, handler_timeout: :infinity)
+    socket = connect(server)
+    :ok = :gen_tcp.send(socket, read_frame(1, 0))
+    assert_receive {:disconnect_handler, handler_process}
+    handler_monitor = Process.monitor(handler_process)
+
+    :ok = :gen_tcp.close(socket)
+
+    assert_receive {:DOWN, ^handler_monitor, :process, ^handler_process, :killed}
+    assert eventually(fn -> TCPServer.status(server) == {:listening, 0} end)
+  end
+
+  test "stops a trapping handler when its connection is evicted" do
+    parent = self()
+
+    handler = fn
+      _unit_id, {:read_holding_registers, 0, 1} ->
+        Process.flag(:trap_exit, true)
+        send(parent, {:evicted_handler, self()})
+        receive do: (:never -> {:ok, [0]})
+
+      _unit_id, {:read_holding_registers, 1, 1} ->
+        {:ok, [1]}
+    end
+
+    server = start_server(handler, connections: 1, handler_timeout: :infinity)
+    first = connect(server)
+    :ok = :gen_tcp.send(first, read_frame(1, 0))
+    assert_receive {:evicted_handler, handler_process}
+    handler_monitor = Process.monitor(handler_process)
+
+    second = connect(server)
+
+    assert exchange(second, 2, 1, <<3, 0, 1, 0, 1>>) == {:ok, 2, 1, <<3, 2, 0, 1>>}
+    assert_receive {:DOWN, ^handler_monitor, :process, ^handler_process, :killed}
+    assert :gen_tcp.recv(first, 0, 1_000) == {:error, :closed}
+  end
+
+  test "listener kills a trapping handler when its broker is forcibly killed" do
+    parent = self()
+
+    handler = fn _unit_id, {:read_holding_registers, 0, 1} ->
+      Process.flag(:trap_exit, true)
+      send(parent, {:force_kill_handler, self()})
+      receive do: (:never -> {:ok, [0]})
+    end
+
+    server = start_server(handler, handler_timeout: :infinity)
+    socket = connect(server)
+    :ok = :gen_tcp.send(socket, read_frame(1, 0))
+    assert_receive {:force_kill_handler, handler_process}
+    monitor = Process.monitor(handler_process)
+
+    assert eventually(fn ->
+             case :sys.get_state(server).clients |> Map.values() do
+               [%{handler: ^handler_process}] -> true
+               _ -> false
+             end
+           end)
+
+    [broker] = Map.keys(:sys.get_state(server).clients)
+    Process.exit(broker, :kill)
+
+    assert_receive {:DOWN, ^monitor, :process, ^handler_process, :killed}, 1_000
+    assert :gen_tcp.recv(socket, 0, 1_000) == {:error, :closed}
+    assert eventually(fn -> TCPServer.status(server) == {:listening, 0} end)
+  end
+
+  test "server stop removes a broker admitted before socket handoff" do
+    server = start_server(fn _unit_id, _request -> :ok end)
+    {:ok, broker} = :gen_server.call(server, {:admit, {127, 0, 0, 1}})
+    monitor = Process.monitor(broker)
+
+    assert TCPServer.status(server) == {:listening, 1}
+    assert :ok = TCPServer.stop(server)
+    assert_receive {:DOWN, ^monitor, :process, ^broker, :normal}
+  end
+
+  test "evicts a broker admitted before handoff and serves the replacement" do
+    server =
+      start_server(fn _unit_id, {:read_holding_registers, 0, 1} -> {:ok, [42]} end,
+        connections: 1
+      )
+
+    {:ok, waiting_broker} = :gen_server.call(server, {:admit, {127, 0, 0, 1}})
+    monitor = Process.monitor(waiting_broker)
+    socket = connect(server)
+
+    assert exchange(socket, 1, 1, <<3, 0, 0, 0, 1>>) == {:ok, 1, 1, <<3, 2, 0, 42>>}
+    assert_receive {:DOWN, ^monitor, :process, ^waiting_broker, :normal}
+    assert TCPServer.status(server) == {:listening, 1}
+  end
+
+  test "eviction completes even when an old broker cannot receive stop" do
+    server =
+      start_server(fn _unit_id, {:read_holding_registers, 0, 1} -> {:ok, [42]} end,
+        connections: 1
+      )
+
+    old_socket = connect(server)
+    assert eventually(fn -> TCPServer.status(server) == {:listening, 1} end)
+    [broker] = Map.keys(:sys.get_state(server).clients)
+    monitor = Process.monitor(broker)
+
+    :erlang.suspend_process(broker)
+    started_at = System.monotonic_time(:millisecond)
+    next_socket = connect(server)
+
+    assert eventually(
+             fn ->
+               case Map.keys(:sys.get_state(server).clients) do
+                 [next_broker] -> next_broker != broker
+                 _ -> false
+               end
+             end,
+             400
+           )
+
+    assert exchange(next_socket, 2, 1, <<3, 0, 0, 0, 1>>) == {:ok, 2, 1, <<3, 2, 0, 42>>}
+    assert System.monotonic_time(:millisecond) - started_at < 2_500
+    assert_receive {:DOWN, ^monitor, :process, ^broker, :killed}
+    assert :gen_tcp.recv(old_socket, 0, 1_000) == {:error, :closed}
+  end
+
+  test "server stop is bounded when a broker is suspended" do
+    parent = self()
+
+    handler = fn _unit_id, {:read_holding_registers, 0, 1} ->
+      Process.flag(:trap_exit, true)
+      send(parent, {:suspended_handler, self()})
+      receive do: (:never -> {:ok, [0]})
+    end
+
+    server = start_server(handler, handler_timeout: :infinity)
+    socket = connect(server)
+    :ok = :gen_tcp.send(socket, read_frame(1, 0))
+    assert_receive {:suspended_handler, handler_process}
+    handler_monitor = Process.monitor(handler_process)
+
+    assert eventually(fn ->
+             case :sys.get_state(server).clients |> Map.values() do
+               [%{handler: ^handler_process}] -> true
+               _ -> false
+             end
+           end)
+
+    [broker] = Map.keys(:sys.get_state(server).clients)
+    broker_monitor = Process.monitor(broker)
+    :erlang.suspend_process(broker)
+
+    started_at = System.monotonic_time(:millisecond)
+    assert :ok = TCPServer.stop(server)
+    assert System.monotonic_time(:millisecond) - started_at < 2_500
+    assert_receive {:DOWN, ^broker_monitor, :process, ^broker, :killed}
+    assert_receive {:DOWN, ^handler_monitor, :process, ^handler_process, :killed}
+    assert :gen_tcp.recv(socket, 0, 1_000) == {:error, :closed}
+  end
+
+  test "server stop shares one deadline across unresponsive brokers" do
+    server =
+      start_server(fn _unit_id, {:read_holding_registers, 0, 1} -> {:ok, [42]} end,
+        connections: 3
+      )
+
+    sockets = for _ <- 1..3, do: connect(server)
+    assert eventually(fn -> TCPServer.status(server) == {:listening, 3} end)
+
+    brokers = Map.keys(:sys.get_state(server).clients)
+    monitors = Enum.map(brokers, &{&1, Process.monitor(&1)})
+    Enum.each(brokers, &:erlang.suspend_process/1)
+
+    started_at = System.monotonic_time(:millisecond)
+    assert :ok = TCPServer.stop(server)
+    assert System.monotonic_time(:millisecond) - started_at < 2_500
+
+    for {broker, monitor} <- monitors do
+      assert_receive {:DOWN, ^monitor, :process, ^broker, :killed}
+    end
+
+    for socket <- sockets do
+      assert :gen_tcp.recv(socket, 0, 1_000) == {:error, :closed}
+    end
+  end
+
+  test "rapid admission and disconnect during eviction leaves the listener usable" do
+    server =
+      start_server(fn _unit_id, {:read_holding_registers, 0, 1} -> {:ok, [42]} end,
+        connections: 1
+      )
+
+    # Closing immediately after connect races with accept, admit, and
+    # controlling_process handover. Repeat without introducing test hooks.
+    for _ <- 1..40 do
+      socket = connect(server)
+      :ok = :gen_tcp.close(socket)
+    end
+
+    assert eventually(fn -> TCPServer.status(server) == {:listening, 0} end, 300)
+    socket = connect(server)
+    assert exchange(socket, 41, 1, <<3, 0, 0, 0, 1>>) == {:ok, 41, 1, <<3, 2, 0, 42>>}
+    assert :ok = TCPServer.stop(server)
+    assert :gen_tcp.recv(socket, 0, 1_000) == {:error, :closed}
+  end
+
+  test "server shutdown during concurrent socket admission does not hang" do
+    server =
+      start_server(fn _unit_id, {:read_holding_registers, 0, 1} -> {:ok, [42]} end,
+        connections: 1
+      )
+
+    port = TCPServer.port(server)
+    parent = self()
+
+    connector =
+      Task.async(fn ->
+        send(parent, :admission_churn_started)
+
+        for _ <- 1..40 do
+          case :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 200) do
+            {:ok, socket} -> :ok = :gen_tcp.close(socket)
+            {:error, _reason} -> :ok
+          end
+        end
+
+        :ok
+      end)
+
+    assert_receive :admission_churn_started
+    assert :ok = TCPServer.stop(server)
+    assert Task.await(connector, 5_000) == :ok
+  end
+
+  test "recovers after repeated receive-buffer overload" do
+    parent = self()
+
+    handler = fn _unit_id, {:read_holding_registers, 0, 1} ->
+      Process.flag(:trap_exit, true)
+      send(parent, {:overload_handler, self()})
+      receive do: (:never -> {:ok, [0]})
+    end
+
+    server = start_server(handler, max_buffer: 260, handler_timeout: :infinity)
+
+    for cycle <- 1..10 do
+      socket = connect(server)
+      :ok = :gen_tcp.send(socket, read_frame(cycle, 0))
+      assert_receive {:overload_handler, handler_process}
+      handler_monitor = Process.monitor(handler_process)
+
+      burst = for transaction_id <- 100..180, do: read_frame(transaction_id, 0)
+      :ok = :gen_tcp.send(socket, burst)
+
+      assert :gen_tcp.recv(socket, 0, 1_000) == {:error, :closed}
+      assert_receive {:DOWN, ^handler_monitor, :process, ^handler_process, :killed}
+      assert eventually(fn -> TCPServer.status(server) == {:listening, 0} end)
+    end
+
+    socket = connect(server)
+    assert eventually(fn -> TCPServer.status(server) == {:listening, 1} end)
+    :ok = :gen_tcp.close(socket)
+  end
+
   test "listens on an IPv6 address" do
     address = {0, 0, 0, 0, 0, 0, 0, 1}
     handler = fn _unit_id, {:read_holding_registers, 0, 1} -> {:ok, [42]} end
@@ -238,6 +585,9 @@ defmodule AVModbus.TCPServerTest do
     assert TCPServer.start_link(handler, connections: 0) == {:error, :invalid_connections_option}
     assert TCPServer.start_link(handler, idle: 0) == {:error, :invalid_idle_option}
 
+    assert TCPServer.start_link(handler, max_buffer: 259) ==
+             {:error, :invalid_max_buffer_option}
+
     assert TCPServer.start_link(handler, allow: [{{10, 0, 0, 0}, 40}]) ==
              {:error, :invalid_allow_option}
 
@@ -261,5 +611,10 @@ defmodule AVModbus.TCPServerTest do
     if Process.alive?(pid), do: TCPServer.stop(server)
   catch
     :exit, _reason -> :ok
+  end
+
+  defp read_frame(transaction_id, address) do
+    {:ok, frame} = TCP.encode(transaction_id, 1, <<3, address::16, 1::16>>)
+    frame
   end
 end

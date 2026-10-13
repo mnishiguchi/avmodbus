@@ -149,6 +149,8 @@ property test、soak test、`pymodbus` / `libmodbus` との相互運用テスト
 
 Modbus/TCP Security は、対象 AtomVM runtime に mutual TLS のための API が揃っていないため未対応です。
 TLS option は安全のため `{:error, :tls_not_supported}` を返し、暗号化なしへ自動的に切り替わることはありません。
+Modbus TCP Server は trusted network に限定して配置してください。bind address、allowlist、authorization、
+firewall の設定例は [開発者ガイド](docs/DEVELOPMENT.md#modbustcp-security) にあります。
 
 ## ライセンス
 

@@ -4,6 +4,9 @@ defmodule AVModbus.Server.TCP do
 
   connection ごとに独立した process が fragmented / concatenated MBAP stream を処理し、
   同じ connection の request は順番に、異なる connection は並行して処理します。
+  socket owner は handler の完了を待たず受信を続け、worker へ未配送の broker buffer を
+  `:max_buffer` で制限します。active socket mailbox、worker が処理中の data、runtime の
+  socket buffer はこの値に含みません。
   request semantics、handler isolation、authorization、device identification は
   `AVModbus.Server` と共有します。
   """
@@ -19,6 +22,9 @@ defmodule AVModbus.Server.TCP do
   @default_handler_timeout 10_000
   @default_idle 60_000
   @default_connections 16
+  @default_max_buffer 2_048
+  @client_stop_timeout 1_000
+  @client_kill_timeout 100
 
   @type server :: pid() | atom()
   @type option ::
@@ -27,6 +33,7 @@ defmodule AVModbus.Server.TCP do
           | {:connections, pos_integer()}
           | {:idle, pos_integer() | :infinity}
           | {:handler_timeout, pos_integer() | :infinity}
+          | {:max_buffer, pos_integer()}
           | {:allow, nil | [term()]}
           | {:authorize, Server.authorize() | nil}
           | {:identification, Identification.objects() | nil}
@@ -92,6 +99,7 @@ defmodule AVModbus.Server.TCP do
                authorize: config.authorize,
                identification: config.identification,
                handler_timeout: config.handler_timeout,
+               max_buffer: config.max_buffer,
                idle: config.idle,
                connections: config.connections,
                allow: config.allow,
@@ -132,11 +140,12 @@ defmodule AVModbus.Server.TCP do
       authorize: next.authorize,
       identification: next.identification,
       handler_timeout: next.handler_timeout,
-      idle: next.idle
+      idle: next.idle,
+      max_buffer: next.max_buffer
     }
 
     {pid, monitor} = :erlang.spawn_monitor(fn -> connection(config) end)
-    client = %{monitor: monitor, address: address, last_at: monotonic_time()}
+    client = %{monitor: monitor, address: address, last_at: monotonic_time(), handler: nil}
     {:reply, {:ok, pid}, %{next | clients: Map.put(next.clients, pid, client)}}
   end
 
@@ -172,8 +181,46 @@ defmodule AVModbus.Server.TCP do
     {:stop, reason, state}
   end
 
-  def handle_info({:DOWN, _monitor, :process, pid, _reason}, state),
-    do: {:noreply, %{state | clients: Map.delete(state.clients, pid)}}
+  # The listener is a fallback owner for isolated handlers. A broker normally
+  # kills its handler on close, but a forced :kill cannot run that cleanup.
+  # Broker messages preceding its DOWN are handled before removal; late claims
+  # for an already removed broker are killed rather than orphaned.
+  def handle_info({__MODULE__, :handler_claimed, broker, handler, reference}, state)
+      when is_pid(broker) and is_pid(handler) and is_reference(reference) do
+    case Map.fetch(state.clients, broker) do
+      {:ok, client} ->
+        send(broker, {__MODULE__, reference, :ok})
+
+        {:noreply,
+         %{state | clients: Map.put(state.clients, broker, %{client | handler: handler})}}
+
+      :error ->
+        Process.exit(handler, :kill)
+        send(broker, {__MODULE__, reference, {:error, :closed}})
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({__MODULE__, :handler_released, broker, handler}, state) do
+    case Map.fetch(state.clients, broker) do
+      {:ok, %{handler: ^handler} = client} ->
+        {:noreply, %{state | clients: Map.put(state.clients, broker, %{client | handler: nil})}}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:DOWN, monitor, :process, pid, _reason}, state) do
+    case Map.fetch(state.clients, pid) do
+      {:ok, %{monitor: ^monitor} = client} ->
+        kill_handler(client)
+        {:noreply, %{state | clients: Map.delete(state.clients, pid)}}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
 
   def handle_info(_message, state), do: {:noreply, state}
 
@@ -184,6 +231,9 @@ defmodule AVModbus.Server.TCP do
     _result = :gen_tcp.close(state.listener)
     if state.acceptor, do: Process.exit(state.acceptor, :kill)
     kill_clients(Map.to_list(state.clients))
+    # Kill any registered handler even if its broker was forcibly killed.
+    kill_handlers(Map.to_list(state.clients))
+    kill_queued_handlers()
     :ok
   end
 
@@ -283,12 +333,22 @@ defmodule AVModbus.Server.TCP do
   defp hand_over(server, socket, allow) do
     with {:ok, {address, _port}} <- :inet.peername(socket),
          true <- allowed?(address, allow),
-         {:ok, pid} <- admit(server, address),
-         :ok <- :gen_tcp.controlling_process(socket, pid) do
-      send(pid, {:socket, socket})
-      forward_socket_messages(socket, pid)
+         {:ok, pid} <- admit(server, address) do
+      transfer_socket(socket, pid)
     else
       _not_allowed_or_stopped -> :gen_tcp.close(socket)
+    end
+  end
+
+  defp transfer_socket(socket, pid) do
+    case :gen_tcp.controlling_process(socket, pid) do
+      :ok ->
+        send(pid, {:socket, socket})
+        forward_socket_messages(socket, pid)
+
+      {:error, _reason} ->
+        send(pid, {__MODULE__, :stop})
+        :gen_tcp.close(socket)
     end
   end
 
@@ -319,54 +379,215 @@ defmodule AVModbus.Server.TCP do
   defp connection(config) do
     receive do
       {:socket, socket} ->
-        loop(config, socket, <<>>, deadline(config.idle))
-        :gen_tcp.close(socket)
+        Process.flag(:trap_exit, true)
+        broker = self()
+        worker = spawn_link(fn -> loop(config, socket, broker, <<>>, deadline(config.idle)) end)
+
+        connection_broker(%{
+          server: config.server,
+          socket: socket,
+          worker: worker,
+          handler: nil,
+          max_buffer: config.max_buffer,
+          buffer: <<>>,
+          waiter: nil
+        })
+
+      {__MODULE__, :stop} ->
+        :ok
     after
       5_000 -> :ok
     end
   end
 
-  defp loop(config, socket, buffer, :infinity) do
+  defp connection_broker(state) do
     receive do
-      {:tcp, ^socket, data} when is_binary(data) ->
-        continue(config, socket, <<buffer::binary, data::binary>>, :infinity)
+      {:tcp, socket, data} when socket == state.socket and is_binary(data) ->
+        case accept_connection_data(state, data) do
+          {:ok, next} -> connection_broker(next)
+          :overflow -> close_connection(state)
+        end
 
-      {:tcp_closed, ^socket} ->
-        :ok
+      {:tcp_closed, socket} when socket == state.socket ->
+        close_connection(state)
 
-      {:tcp_error, ^socket, _reason} ->
+      {:tcp_error, socket, _reason} when socket == state.socket ->
+        close_connection(state)
+
+      {__MODULE__, :read, caller, reference} ->
+        connection_broker(serve_connection_read(state, caller, reference))
+
+      {__MODULE__, :cancel, caller, reference} ->
+        next = cancel_connection_read(state, reference)
+        send(caller, {__MODULE__, reference, :cancelled})
+        connection_broker(next)
+
+      {Server, :claim_handler, worker, handler, reference}
+      when worker == state.worker and is_pid(handler) ->
+        case state.handler do
+          nil ->
+            case register_handler(state.server, handler) do
+              :ok ->
+                Process.link(handler)
+                send(worker, {Server, reference, :ok})
+                connection_broker(%{state | handler: handler})
+
+              {:error, :closed} ->
+                send(worker, {Server, reference, {:error, :closed}})
+                close_connection(state)
+            end
+
+          _active ->
+            send(worker, {Server, reference, {:error, :closed}})
+            connection_broker(state)
+        end
+
+      {Server, :release_handler, worker, handler}
+      when worker == state.worker and handler == state.handler ->
+        send(state.server, {__MODULE__, :handler_released, self(), handler})
+        connection_broker(%{state | handler: nil})
+
+      {__MODULE__, :stop} ->
+        close_connection(state)
+
+      {:EXIT, worker, _reason} when worker == state.worker ->
+        close_connection(state)
+
+      _message ->
+        connection_broker(state)
+    end
+  end
+
+  defp accept_connection_data(state, <<>>), do: {:ok, state}
+
+  defp accept_connection_data(state, data) when byte_size(data) > state.max_buffer,
+    do: :overflow
+
+  defp accept_connection_data(%{waiter: {caller, reference}} = state, data) do
+    send(caller, {__MODULE__, reference, {:ok, data}})
+    {:ok, %{state | waiter: nil}}
+  end
+
+  defp accept_connection_data(state, data) do
+    buffer = <<state.buffer::binary, data::binary>>
+
+    if byte_size(buffer) <= state.max_buffer,
+      do: {:ok, %{state | buffer: buffer}},
+      else: :overflow
+  end
+
+  defp serve_connection_read(%{buffer: buffer} = state, caller, reference)
+       when buffer != <<>> do
+    send(caller, {__MODULE__, reference, {:ok, buffer}})
+    %{state | buffer: <<>>}
+  end
+
+  defp serve_connection_read(%{waiter: nil} = state, caller, reference),
+    do: %{state | waiter: {caller, reference}}
+
+  defp serve_connection_read(state, caller, reference) do
+    send(caller, {__MODULE__, reference, {:error, :ealready}})
+    state
+  end
+
+  defp cancel_connection_read(%{waiter: {_caller, reference}} = state, reference),
+    do: %{state | waiter: nil}
+
+  defp cancel_connection_read(state, _reference), do: state
+
+  defp register_handler(server, handler) do
+    reference = make_ref()
+    monitor = Process.monitor(server)
+    send(server, {__MODULE__, :handler_claimed, self(), handler, reference})
+
+    receive do
+      {__MODULE__, ^reference, result} ->
+        :erlang.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^server, _reason} ->
+        {:error, :closed}
+    end
+  end
+
+  defp close_connection(state) do
+    if state.waiter do
+      {caller, reference} = state.waiter
+      send(caller, {__MODULE__, reference, {:error, :closed}})
+    end
+
+    :gen_tcp.close(state.socket)
+    if state.handler, do: Process.exit(state.handler, :kill)
+    Process.exit(state.worker, :kill)
+    :ok
+  end
+
+  defp loop(config, socket, broker, buffer, :infinity) do
+    case connection_read(broker, :infinity) do
+      {:ok, data} when is_binary(data) ->
+        continue(config, socket, broker, <<buffer::binary, data::binary>>, :infinity)
+
+      {:error, _reason} ->
         :ok
     end
   end
 
-  defp loop(config, socket, buffer, deadline_at) do
+  defp loop(config, socket, broker, buffer, deadline_at) do
+    case connection_read(broker, wait(deadline_at)) do
+      {:ok, data} when is_binary(data) ->
+        continue(config, socket, broker, <<buffer::binary, data::binary>>, deadline_at)
+
+      {:error, _reason} ->
+        :ok
+    end
+  end
+
+  defp connection_read(broker, :infinity) do
+    reference = make_ref()
+    send(broker, {__MODULE__, :read, self(), reference})
+
     receive do
-      {:tcp, ^socket, data} when is_binary(data) ->
-        continue(config, socket, <<buffer::binary, data::binary>>, deadline_at)
+      {__MODULE__, ^reference, result} -> result
+    end
+  end
 
-      {:tcp_closed, ^socket} ->
-        :ok
+  defp connection_read(broker, timeout_ms) do
+    reference = make_ref()
+    send(broker, {__MODULE__, :read, self(), reference})
 
-      {:tcp_error, ^socket, _reason} ->
-        :ok
+    receive do
+      {__MODULE__, ^reference, result} -> result
     after
-      wait(deadline_at) -> :ok
+      timeout_ms ->
+        send(broker, {__MODULE__, :cancel, self(), reference})
+        await_connection_cancel(reference)
+        {:error, :timeout}
     end
   end
 
-  defp continue(config, socket, buffer, deadline_at) do
-    case frames(config, socket, buffer, deadline_at) do
-      {:ok, rest, next_deadline} -> loop(config, socket, rest, next_deadline)
+  defp await_connection_cancel(reference) do
+    receive do
+      {__MODULE__, ^reference, :cancelled} -> :ok
+      {__MODULE__, ^reference, _late_result} -> await_connection_cancel(reference)
+    after
+      100 -> :ok
+    end
+  end
+
+  defp continue(config, socket, broker, buffer, deadline_at) do
+    case frames(config, socket, broker, buffer, deadline_at) do
+      {:ok, rest, next_deadline} -> loop(config, socket, broker, rest, next_deadline)
       :close -> :ok
     end
   end
 
-  defp frames(config, socket, buffer, deadline_at) do
+  defp frames(config, socket, broker, buffer, deadline_at) do
     case Frame.decode(buffer) do
       {:ok, transaction_id, unit_id, pdu, rest} ->
-        case touch(config.server) do
+        case touch(config.server, broker) do
           :ok ->
             policy = %{
+              __lifecycle_owner__: broker,
               authorize: config.authorize,
               identification: config.identification,
               role: nil
@@ -377,13 +598,13 @@ defmodule AVModbus.Server.TCP do
                 {:ok, response} = Frame.encode(transaction_id, unit_id, response_pdu)
 
                 case :gen_tcp.send(socket, response) do
-                  :ok -> frames(config, socket, rest, deadline(config.idle))
+                  :ok -> frames(config, socket, broker, rest, deadline(config.idle))
                   {:error, _reason} -> :close
                   _other -> :close
                 end
 
               :ignore ->
-                frames(config, socket, rest, deadline(config.idle))
+                frames(config, socket, broker, rest, deadline(config.idle))
             end
 
           {:error, :closed} ->
@@ -391,7 +612,7 @@ defmodule AVModbus.Server.TCP do
         end
 
       {:discard, rest} ->
-        frames(config, socket, rest, deadline_at)
+        frames(config, socket, broker, rest, deadline_at)
 
       :more ->
         {:ok, buffer, deadline_at}
@@ -405,9 +626,9 @@ defmodule AVModbus.Server.TCP do
   defp deadline(idle), do: monotonic_ms() + idle
   defp wait(deadline_at), do: max(deadline_at - monotonic_ms(), 0)
 
-  defp touch(server) do
+  defp touch(server, connection) do
     try do
-      :gen_server.call(server, {:activity, self(), monotonic_time()}, :infinity)
+      :gen_server.call(server, {:activity, connection, monotonic_time()}, :infinity)
     catch
       :exit, _reason -> {:error, :closed}
     end
@@ -426,8 +647,8 @@ defmodule AVModbus.Server.TCP do
             state
 
           {:ok, client} ->
-            Process.exit(pid, :kill)
-            :erlang.demonitor(client.monitor, [:flush])
+            stop_client(pid, client.monitor)
+            kill_handler(client)
             %{state | clients: Map.delete(state.clients, pid)}
         end
     end
@@ -486,11 +707,106 @@ defmodule AVModbus.Server.TCP do
   defp list_length([], result), do: result
   defp list_length([_value | rest], result), do: list_length(rest, result + 1)
 
-  defp kill_clients([]), do: :ok
+  defp kill_handler(%{handler: handler}) when is_pid(handler),
+    do: Process.exit(handler, :kill)
 
-  defp kill_clients([{pid, _client} | rest]) do
+  defp kill_handler(_client), do: :ok
+
+  defp kill_handlers([]), do: :ok
+
+  defp kill_handlers([{_pid, client} | rest]) do
+    kill_handler(client)
+    kill_handlers(rest)
+  end
+
+  # Claims queued while the listener was waiting for client shutdown are not
+  # reflected in its state; drain them before the listener itself exits.
+  defp kill_queued_handlers do
+    receive do
+      {__MODULE__, :handler_claimed, _broker, handler, _reference} when is_pid(handler) ->
+        Process.exit(handler, :kill)
+        kill_queued_handlers()
+    after
+      0 -> :ok
+    end
+  end
+
+  defp kill_clients(clients) do
+    request_client_stops(clients)
+    await_client_stops(clients, monotonic_ms() + @client_stop_timeout)
+  end
+
+  defp request_client_stops([]), do: :ok
+
+  defp request_client_stops([{pid, _client} | rest]) do
+    send(pid, {__MODULE__, :stop})
+    request_client_stops(rest)
+  end
+
+  defp await_client_stops([], _deadline), do: :ok
+
+  defp await_client_stops([{pid, client} | rest] = clients, deadline_at) do
+    receive do
+      {:DOWN, monitor, :process, ^pid, _reason} when monitor == client.monitor ->
+        await_client_stops(rest, deadline_at)
+    after
+      wait(deadline_at) ->
+        force_client_stops(clients)
+        await_forced_client_stops(clients, monotonic_ms() + @client_kill_timeout)
+    end
+  end
+
+  defp stop_client(pid, monitor) do
+    send(pid, {__MODULE__, :stop})
+    await_client_stop(pid, monitor, @client_stop_timeout)
+  end
+
+  defp await_client_stop(pid, monitor, timeout_ms) do
+    receive do
+      {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+    after
+      timeout_ms ->
+        # A broker waiting for socket handover or stuck in native code must
+        # not indefinitely block eviction or listener shutdown.
+        Process.exit(pid, :kill)
+        await_forced_client_stop(pid, monitor)
+    end
+  end
+
+  defp await_forced_client_stop(pid, monitor) do
+    receive do
+      {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+    after
+      @client_kill_timeout ->
+        :erlang.demonitor(monitor, [:flush])
+        :ok
+    end
+  end
+
+  defp force_client_stops([]), do: :ok
+
+  defp force_client_stops([{pid, _client} | rest]) do
     Process.exit(pid, :kill)
-    kill_clients(rest)
+    force_client_stops(rest)
+  end
+
+  defp await_forced_client_stops([], _deadline), do: :ok
+
+  defp await_forced_client_stops([{pid, client} | rest], deadline_at) do
+    receive do
+      {:DOWN, monitor, :process, ^pid, _reason} when monitor == client.monitor ->
+        await_forced_client_stops(rest, deadline_at)
+    after
+      wait(deadline_at) ->
+        demonitor_clients([{pid, client} | rest])
+    end
+  end
+
+  defp demonitor_clients([]), do: :ok
+
+  defp demonitor_clients([{_pid, client} | rest]) do
+    :erlang.demonitor(client.monitor, [:flush])
+    demonitor_clients(rest)
   end
 
   defp allowed_in?(_address, []), do: false
@@ -547,6 +863,7 @@ defmodule AVModbus.Server.TCP do
          connections = option(options, :connections, @default_connections),
          idle = option(options, :idle, @default_idle),
          handler_timeout = option(options, :handler_timeout, @default_handler_timeout),
+         max_buffer = option(options, :max_buffer, @default_max_buffer),
          allow = option(options, :allow, nil),
          authorize = option(options, :authorize, nil),
          identification = option(options, :identification, nil),
@@ -556,6 +873,7 @@ defmodule AVModbus.Server.TCP do
          :ok <- validate_connections(connections),
          :ok <- validate_idle(idle),
          :ok <- validate_handler_timeout(handler_timeout),
+         :ok <- validate_max_buffer(max_buffer),
          :ok <- validate_allow(allow),
          :ok <- validate_authorize(authorize),
          {:ok, identification} <- validate_identification(identification) do
@@ -567,6 +885,7 @@ defmodule AVModbus.Server.TCP do
          connections: connections,
          idle: idle,
          handler_timeout: handler_timeout,
+         max_buffer: max_buffer,
          allow: allow,
          authorize: authorize,
          identification: identification
@@ -586,6 +905,7 @@ defmodule AVModbus.Server.TCP do
               :connections,
               :idle,
               :handler_timeout,
+              :max_buffer,
               :allow,
               :authorize,
               :identification,
@@ -654,6 +974,9 @@ defmodule AVModbus.Server.TCP do
   defp validate_handler_timeout(:infinity), do: :ok
   defp validate_handler_timeout(value) when is_integer(value) and value > 0, do: :ok
   defp validate_handler_timeout(_value), do: {:error, :invalid_handler_timeout_option}
+
+  defp validate_max_buffer(value) when is_integer(value) and value >= 260, do: :ok
+  defp validate_max_buffer(_value), do: {:error, :invalid_max_buffer_option}
 
   defp validate_allow(nil), do: :ok
   defp validate_allow(allow) when is_list(allow), do: validate_allow_entries(allow)

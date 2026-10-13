@@ -165,13 +165,49 @@ Modbus ASCII は `transport: :ascii`、Modbus TCP は `transport: :tcp` を指�
   AVModbus.Server.start_link(
     handler: {AVModbus.Memory, memory},
     transport: :tcp,
-    address: {0, 0, 0, 0},
+    address: {192, 168, 10, 20},
     port: 502,
-    connections: 16
+    connections: 16,
+    max_buffer: 2_048,
+    allow: [{{192, 168, 10, 0}, 24}],
+    authorize: fn _role, unit_id, _request -> unit_id == 1 end
   )
 ```
 
 Server も supervision tree から起動でき、登録名を `status/1`、`port/1`、`stop/1` に渡せます。
+`max_buffer` は slow handler 中に、socket owner の broker が protocol worker へまだ渡していない binary の
+上限です。Modbus TCP ADU の最大長を保持できる 260 bytes 以上を指定し、単一受信 chunk または broker 内の
+蓄積が超過した connection は閉じます。active socket mailbox、worker が処理中の chunk / frame remainder、
+OS / runtime socket buffer はこの値に含まれないため、connection 全体の厳密な memory 上限ではありません。
+connection を閉じるときは、その connection で実行中の isolated handler も `:kill` で停止します。
+これは handler が `Process.flag(:trap_exit, true)` を設定していても適用する lifecycle contract です。
+handler に connection より長い寿命が必要な場合は、handler から別の supervised process へ処理を委譲してください。
+
+## TCP shutdown と故障時の cleanup
+
+接続 broker は socket handover 待機中でも stop request を処理します。listener は通常の stop / eviction
+で broker の停止を待ちますが、応答しない broker は 1 秒後にまとめて `:kill` し、さらに最大 100 ms だけ
+終了通知を待ちます。listener の応答を無期限に止めず、server stop 全体でこの待機 budget を共有します。
+
+正常な切断では broker が実行中の isolated handler を停止します。broker が外部から `:kill` された場合も、
+listener が登録済み handler を終了させる fallback を持ちます。この所有権監視は listener が生存している
+範囲の保証であり、VM 全体の異常終了や listener の強制 `:kill` までは保証しません。
+
+Host の回帰テストには forced broker death、停止不能 broker、rapid connect/disconnect と TCP burst が含まれます。
+TCP burst の broker / protocol worker process mailbox と memory を標本化するには次を実行します。
+
+```sh
+AVMODBUS_PEAK_REPORT=1 mix test test/avmodbus/tcp_server_load_test.exs
+```
+
+報告する値は polling で見えた **sampled maximum** です。OS socket buffer、worker、handler、
+仮想マシン全体の厳密な peak を意味しません。実機では既存の resource probe / health telemetry と併せ、
+同一 firmware と負荷条件で比較してください。
+
+2026-10-14 の host baseline では、最初の handler を停止したまま 160 個の 12-byte ADU を 1 ms 間隔で送り、
+6 run すべてで broker memory 16,768 bytes / heap 1,598 words、worker memory 2,744 bytes / heap 233 words、
+sampled mailbox は broker 0–1 / worker 0 でした。この値は host BEAM と当該負荷の比較基準であり、
+AtomVM や別の socket chunking に対する上限ではありません。
 
 ## 起動時の設定チェック
 
@@ -190,6 +226,17 @@ UART、socket、listener などの resource を確保する前に設定を検査
 対象の AtomVM 0.7 runtime は、Modbus/TCP Security に必要な TLS Server、peer certificate verification、
 client certificate authentication をすべて提供していません。`tls:` / `ssl:` を指定すると
 `{:error, :tls_not_supported}` を返し、暗号化なしへ自動的に切り替えません。
+
+暗号化されていない Modbus TCP Server を public network や untrusted LAN の全 interface に公開しないでください。
+
+- `address:` は device の trusted interface に割り当てた IP address を指定する
+- `allow:` で接続元 address または network prefix を制限する
+- `authorize:` で許可する Unit ID と request を application policy に合わせて制限する
+- OS / router firewall でも TCP port 502 への接続元を同じ subnet または管理 host に限定する
+- untrusted network を通す場合は、相互認証を提供する VPN または secure gateway の内側へ配置する
+
+`connections:`、`max_buffer:`、`idle:`、`handler_timeout:` は防御境界です。Internet へ直接公開できる
+authentication の代替ではありません。connection churn は load / resource probe で確認します。
 
 詳細は [ADR 0015](adr/0015-fail-closed-without-mutual-tls.md) を参照してください。
 
@@ -237,7 +284,7 @@ serial test は test 専用 PTY bridge を使います。
 
 ```sh
 python3 -m venv /tmp/avmodbus-pymodbus
-/tmp/avmodbus-pymodbus/bin/pip install pymodbus pyserial
+/tmp/avmodbus-pymodbus/bin/pip install 'pymodbus==3.15.0' pyserial
 PYMODBUS_PYTHON=/tmp/avmodbus-pymodbus/bin/python mix test --include interop
 ```
 
@@ -249,6 +296,8 @@ LIBMODBUS_INTEROP=1 mix test --include libmodbus \
 ```
 
 C peer は test build directory に compile されます。RTU test は test 専用 PTY bridge を使います。
+CI の `interoperability` job では `pymodbus==3.15.0` と `libmodbus-dev` を用意し、
+両方の peer を使った host test を実行します。実 RS485 機材との相互運用テストは含みません。
 
 ## 実機の高度な検証
 

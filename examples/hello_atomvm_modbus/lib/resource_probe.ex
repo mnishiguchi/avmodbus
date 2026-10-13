@@ -43,8 +43,7 @@ if Application.compile_env(:sample_app, :resource_probe, false) do
 
         @connections > @safe_connection_limit ->
           {:error,
-           {:unsafe_connection_count, @connections,
-            {:verified_maximum, @safe_connection_limit}}}
+           {:unsafe_connection_count, @connections, {:verified_maximum, @safe_connection_limit}}}
 
         true ->
           :ok
@@ -97,18 +96,19 @@ if Application.compile_env(:sample_app, :resource_probe, false) do
     defp run_with_clients(cycle, before, check_heap, server, clients) do
       result =
         with :ok <- await_connected(clients, 200),
+             idle = snapshot(),
              {:ok, expected} <- submit_requests(clients, 1, []),
-             peak = snapshot(),
+             active = snapshot(),
              :ok <- collect_results(expected, @request_timeout_ms + 1_000) do
-          {:ok, peak}
+          {:ok, idle, active}
         end
 
       stop_resources(clients, server)
       {recovery, after_cleanup} = await_recovery(before, check_heap, 50)
 
       case result do
-        {:ok, peak} ->
-          report(cycle, before, peak, after_cleanup)
+        {:ok, idle, active} ->
+          report(cycle, before, idle, active, after_cleanup)
 
           if recovery == :ok do
             :ok
@@ -144,7 +144,8 @@ if Application.compile_env(:sample_app, :resource_probe, false) do
 
     defp start_clients(port, remaining, clients) do
       case Client.start_link(
-             transport: :tcp, host: {127, 0, 0, 1},
+             transport: :tcp,
+             host: {127, 0, 0, 1},
              port: port,
              max_pending: 1,
              max_queue: @requests_per_client - 2,
@@ -248,12 +249,13 @@ if Application.compile_env(:sample_app, :resource_probe, false) do
       processes_recovered and heap_recovered
     end
 
-    defp report(cycle, before, peak, after_cleanup) do
+    defp report(cycle, before, idle, active, after_cleanup) do
       IO.puts(
         "modbus_resource_probe cycle=#{cycle} " <>
-          "processes=#{before.process_count}/#{peak.process_count}/#{after_cleanup.process_count} " <>
-          "free_heap=#{before.free_heap}/#{peak.free_heap}/#{after_cleanup.free_heap} " <>
-          "largest_free=#{before.largest_free_block}/#{peak.largest_free_block}/#{after_cleanup.largest_free_block}"
+          "connections=#{@connections} " <>
+          "processes=#{before.process_count}/#{idle.process_count}/#{active.process_count}/#{after_cleanup.process_count} " <>
+          "free_heap=#{before.free_heap}/#{idle.free_heap}/#{active.free_heap}/#{after_cleanup.free_heap} " <>
+          "largest_free=#{before.largest_free_block}/#{idle.largest_free_block}/#{active.largest_free_block}/#{after_cleanup.largest_free_block}"
       )
     end
   end

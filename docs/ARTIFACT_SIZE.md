@@ -8,14 +8,15 @@ AVModbus の AtomVM artifact regression は、pinned toolchain と既定 configu
 `MODBUS_RESOURCE_PROBE=true` の diagnostic build は
 この budget の対象外です。
 
-- 基準値: 139,660 bytes
-- 増加を検知する上限: 139,860 bytes
+- 基準値: 147,536 bytes
+- 増加を検知する上限: 147,736 bytes
 - 余裕: 200 bytes（約 0.1%）
-- build SHA-256: `caf14c2fedee928f86721ee3084d2aa00ee22c1b8eeb592f9a1e60b9e1eaf41c`
+- build SHA-256: `7a995704650c1bd5e7830d6b51c010a0a05b0ecd8644a32cbb4652a59aa39e8a`
 
-UART broker の terminal error precedence を追加した結果、直前の 139,600-byte baseline から 60 bytes
-増加しました。AtomVM compatibility check、host test、実 RS485 workflow を確認し、増分に従来と同じ
-headroom を加えて budget を更新しています。
+TCP listener の handler fallback ownership、bounded shutdown、handoff failure cleanup を追加した結果、
+直前の 144,508-byte baseline から 3,028 bytes 増加しました。AtomVM compatibility check、host test、
+pymodbus interoperability、短時間 soak、ESP32-C5 resource probe と実 RS485 smoke test を確認し、
+増分に従来と同じ headroom を加えて budget を更新しています。
 
 次の command は production artifact を再 build し、budget を超えた場合に失敗します。
 
@@ -28,7 +29,7 @@ artifact path と budget は、個別検証用に環境変数で上書きでき�
 
 ```sh
 AVMODBUS_AVM_PATH=/tmp/sample_app.avm \
-AVMODBUS_AVM_BUDGET_BYTES=139860 \
+AVMODBUS_AVM_BUDGET_BYTES=147736 \
 ../../scripts/check_avm_size.sh
 ```
 

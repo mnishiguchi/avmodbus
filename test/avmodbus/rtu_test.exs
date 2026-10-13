@@ -1,7 +1,7 @@
 defmodule AVModbus.RTUTest do
   use ExUnit.Case, async: true
 
-  alias AVModbus.RTU
+  alias AVModbus.{CRC16, RTU}
 
   test "encodes and decodes a function 0x03 frame" do
     pdu = <<0x03, 0x00, 0x00, 0x00, 0x0A>>
@@ -17,6 +17,16 @@ defmodule AVModbus.RTUTest do
 
     assert RTU.decode(<<0x01, 0x03, 0x00>>) == {:error, :frame_too_short}
     assert RTU.encode(248, <<0x03>>) == {:error, :invalid_unit_id}
+
+    for unit_id <- [248, 255] do
+      frame = CRC16.append(<<unit_id, 0x03>>)
+      assert RTU.decode(frame) == {:error, :invalid_unit_id}
+    end
+
+    for unit_id <- [0, 247] do
+      {:ok, frame} = RTU.encode(unit_id, <<0x03>>)
+      assert RTU.decode(frame) == {:ok, unit_id, <<0x03>>}
+    end
   end
 
   test "extracts a response while preserving following bytes" do

@@ -67,6 +67,12 @@
 | 2026-10-13 | async admission 後の production artifact は 139,600 bytes。AtomVM compatibility check を通過し、139,800-byte budget へ更新 |
 | 2026-10-13 | 更新した TCP resource probe を ESP32-C5 で 3 cycle 実行。process は各 cycle `4 -> 57 -> 4` に回復し、`result=ok`。続けて RTU workflow 3 cycle / 60 request も成功し Client board を workflow image に復元 |
 | 2026-10-13 | official AtomVM `v0.7.0-beta.0` tag が実機 revision と同じ `8d3e051` であることを確認。codec 最適化は bottleneck の実測がないため見送り、runtime 更新・実測時の release gate として整理 |
+| 2026-10-13 | TCP connection cleanup を `trap_exit` handler に対しても強制し、切断、overflow、eviction、server stop と 10 回の overload recovery を host test で固定 |
+| 2026-10-13 | ESP32-C5 TCP probe に connected-idle snapshot を追加し、1..4 connections を各 3 cycle 比較。全条件で process count 4 へ回復し、active snapshot の free-heap 減少は最大 44,040 bytes |
+| 2026-10-13 | host 218 tests、pymodbus 込み 232 tests、AtomVM 3 build variants、5 秒 combined soak を再確認。Client board を通常 RTU image に戻し、実 RS485 read を 4 回確認 |
+| 2026-10-14 | pre-handoff shutdown / eviction、handoff failure、forced broker death、複数停止不能 broker を回帰テストし、TCP listener cleanup を shared deadline で bounded 化 |
+| 2026-10-14 | slow-handler TCP burst の broker / worker resource を6回標本化し、pymodbus / libmodbus interoperability を独立 CI job に追加 |
+| 2026-10-14 | lifecycle hardening 後の ESP32-C5 4-connection resource probe を3 cycle再実行。各回 process count `4 / 28 / 61 / 4` に回復し `result=ok` |
 
 ## 現在の検証状況
 
@@ -257,3 +263,52 @@
 - terminal error precedence 追加後の default production `sample_app.avm` は 139,660 bytes、SHA-256 は
   `caf14c2fedee928f86721ee3084d2aa00ee22c1b8eeb592f9a1e60b9e1eaf41c`。139,860-byte budget まで
   200 bytes の headroom を維持
+- TCP Server の active socket owner を protocol worker から分離し、slow handler 中も受信を続ける
+  2,048-byte bounded broker を追加。pipelined request の wire order、slow handler 中の mailbox drain、
+  receive overflow 時の connection close を deterministic host test で確認。RTU decode は予約済み
+  Unit ID `248..255` を `:invalid_unit_id` として拒否
+- host 214 tests / 6 properties、coverage 84.49%、pymodbus TCP / RTU / ASCII 双方向 228 tests / 6
+  properties、Linux file-descriptor exhaustion recovery、5 秒 combined soak が成功。soak は process count
+  127 → 127、RTU / ASCII / TCP は 829 / 830 / 827 transaction を完了。libmodbus system package は
+  検証 host に未導入のため 4 tests は invalid として未実行
+- ESP32-C5 TCP resource probe は 3 cycle とも成功。各 measured cycle の process count は 4 → 61 → 4、
+  free heap は cycle 1 が 134,544 → 89,600 → 133,980 bytes、cycle 2 が
+  133,812 → 90,424 → 133,260 bytes、cycle 3 が 133,092 → 90,448 → 133,244 bytes に回復。
+  default production `sample_app.avm` は 142,628 bytes、SHA-256 は
+  `494916179cfaa7b5e2234694f845bcf6333484010996ee573419ebe97c732cb8`。142,828-byte budget まで
+  200 bytes の headroom を維持
+- TCP receive overflow、切断、eviction、server stop で protocol worker と実行中の isolated handler を
+  同じ connection lifecycle として停止する ownership を追加。`handler_timeout: :infinity` の blocked handler が
+  overflow と server stop で `:killed` になる regression test を 20 回反復し、orphan process が残らないことを確認
+- host 215 tests / 6 properties、coverage 84.75%、AtomVM compatibility check が成功。5 秒 combined soak は
+  process count 127 → 127、RTU / ASCII / TCP は 833 / 833 / 832 transaction を完了。ESP32-C5 TCP resource
+  probe は 3 measured cycle とも process count 4 → 61 → 4 に回復し、最終結果は `ok`。通常の RTU client image
+  へ戻した後、実 RS485 で holding register read を 4 回確認
+- default production `sample_app.avm` は 144,172 bytes、SHA-256 は
+  `2b5a8c5acead8820058adf374f7731e1c2b7b17ece2fe0fefe99d9896c5289b0`。144,372-byte budget まで
+  200 bytes の headroom を維持
+- `trap_exit` handler cleanup と listener / broker stop handshake 追加後の default production
+  `sample_app.avm` は 144,508 bytes、SHA-256 は
+  `dc6bd836ae102d915db9e98d5df4ace9ca483491510f28c08a4b06f73304c005`。144,708-byte budget まで
+  200 bytes の headroom を維持
+- 同変更後は host 218 tests / 6 properties、coverage 84.76%、pymodbus TCP / RTU / ASCII 双方向
+  232 tests / 6 properties、AtomVM default / workflow / resource probe compatibility build が成功。
+  5 秒 combined soak は process count 127 → 127、RTU / ASCII / TCP は 833 / 833 / 832 transaction を完了
+- TCP resource probe は 1..4 connections を各 3 measured cycle 実行し、すべて process count 4 へ回復。
+  Client board を通常 RTU image に復元後、接続済み Server から holding register read を 4 回確認
+- TCP listener は handler 実行前の ownership handshake を持ち、forced broker death 時も登録済み handler を
+  cleanup。socket 未受け渡し broker の shutdown / eviction、handoff failure、suspended broker 1 / 3 connections、
+  rapid admission churn を host test で確認
+- 160 個の 12-byte ADU を 1 ms 間隔で送る slow-handler burst を6回実行。sampled maximum は broker mailbox
+  0–1、memory 16,768 bytes、heap 1,598 words、worker mailbox 0、memory 2,744 bytes、heap 233 words
+- default production `sample_app.avm` は 147,536 bytes、SHA-256 は
+  `7a995704650c1bd5e7830d6b51c010a0a05b0ecd8644a32cbb4652a59aa39e8a`。147,736-byte budget まで
+  200 bytes の headroom を維持
+- host 227 tests / 6 properties、coverage 84.71%、pymodbus TCP / RTU / ASCII 双方向
+  241 tests / 6 properties、AtomVM default / workflow / resource probe compatibility build が成功。
+  5 秒 combined soak は process count 127 → 127、RTU / ASCII / TCP は 832 / 832 / 830 transaction を完了
+- libmodbus は local host に system package がないため再実行せず、Ubuntu CI job で `libmodbus-dev` を導入して
+  pymodbus 3.15.0 とともに検証する構成を追加
+- lifecycle hardening 後の ESP32-C5 4-connection probe は 3 measured cycle とも成功。idle free-heap 減少は
+  16,928–17,560 bytes、active snapshot は 41,144–43,368 bytes、cleanup 後は `-532..+148 bytes` の差で回復
+- probe 後は Client board を通常 RTU image に復元し、接続済み Server から holding register read を 4 回確認

@@ -346,7 +346,10 @@ mix atomvm.esp32.monitor --port /dev/ttyACM0
 ```
 
 最初の warm-up で AtomVM / ESP-IDF network stack の one-time allocation を完了してから、各 measured cycle は
-`before / peak / after cleanup` の process count、free heap、largest free block を出力します。
+`before / connected idle / active snapshot / after cleanup` の process count、free heap、largest free block を出力します。
+loopback Client と Server connection の両方を含む deployed probe 全体の値であり、Server connection 単体の
+heap cost ではありません。active snapshot は request 投入直後の一点計測で、連続観測した最大値ではありません。
+`MODBUS_RESOURCE_PROBE_CONNECTIONS=1..4` を同じ firmware / configuration で比較し、確認済み範囲内の増分を評価できます。
 全 request result、5 秒以内の process cleanup、steady-state baseline から 32 KiB 以内の free-heap recovery が成功した場合だけ最終的に
 `modbus_resource_probe result=ok` を出力します。
 
