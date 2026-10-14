@@ -1,21 +1,20 @@
-# 0014: Client request option を keyword API に統一する
+# 0014: Client の要求オプションをキーワード形式に統一する
 
 ## 背景
 
-timeout や async recipient を positional argument で増やすと、API arity と call site の意味が
-分かりにくくなる。
+タイムアウトや非同期結果の送信先を位置引数として増やすと、引数の数や呼び出し側のコードが分かりにくくなる。
 
 ## 決定
 
-- request の最後の引数は keyword options だけを受け付ける
-- sync option は `timeout:`、`retries:`、`backoff:`
-- device identification helper の category は `category:` とし、既定値は `:basic`
-- retry の既定値は 0 とし、正の値は ADR 0012 の安全性検証を通す
-- async option は `timeout:` と `to:`
-- timeout integer と async recipient の positional form は提供しない
-- retry policy を明示する `retry_request/4` は維持する
-- invalid option は送信前に tagged error で返す
+- 要求の最後の引数にはキーワードオプションだけを受け付ける
+- 同期呼び出しのオプションは `timeout:`、`retries:`、`backoff:`
+- 機器情報を取得する補助関数は `category:` を使い、既定値は `:basic` とする
+- リトライ回数の既定値は 0 とし、正の値は ADR 0012 に基づく安全性検証を通す
+- 非同期呼び出しのオプションは `timeout:` と `to:`
+- タイムアウト値や非同期結果の送信先を位置引数で渡す形式は提供しない
+- リトライ条件を明示する `retry_request/4` は維持する
+- 不正なオプションは送信前にエラーの戻り値で知らせる
 
 ## 影響
 
-request option の追加で arity を増やさず、call site だけで timeout、category、recipient の意味を判別できる。
+オプションが増えても引数の数を変えずに済み、呼び出し側のコードで値の意味を読み取りやすくなる。

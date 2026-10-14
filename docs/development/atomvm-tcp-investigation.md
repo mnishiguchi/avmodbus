@@ -1,4 +1,4 @@
-# AtomVM ESP32-C5 の TCP リソース上限レポート
+# AtomVM ESP32-C5 の TCP リソース上限（調査記録）
 
 この資料は、AVModbus のリソース不足テスト中に見つかった runtime 側の制約を記録します。
 AVModbus の不具合と断定せずに、観測結果を AtomVM の issue へ引き継げる内容にしています。

@@ -1,19 +1,19 @@
-# 0011: 起動時の設定エラーは tagged error で返す
+# 0011: 起動時の設定エラーを戻り値で知らせる
 
 ## 背景
 
-起動 API ごとに validation と failure 形式が異なると、application と Supervisor が原因を安定して判定できない。
+起動 API ごとに設定の検証方法やエラー形式が異なると、アプリケーションや Supervisor が原因を判定しにくい。
 
 ## 決定
 
-- configuration error で raise せず `{:error, reason}` を返す
-- non-list options は `:invalid_options`
-- unknown option は `{:invalid_option, option}`
-- invalid value は `:invalid_<name>_option`
-- invalid handler は `:invalid_handler`
-- UART、socket、process を確保する前に検証する
-- direct / supervised startup で同じ error を返す
+- 設定エラーでは例外を発生させず、`{:error, reason}` を返す
+- オプションがリストでない場合は `:invalid_options`
+- 未知のオプションは `{:invalid_option, option}`
+- 不正な値は `:invalid_<name>_option`
+- 不正なハンドラーは `:invalid_handler`
+- UART、ソケット、プロセスを確保する前に検証する
+- 直接起動と Supervisor 経由の起動で同じエラーを返す
 
 ## 影響
 
-boot policy と test が安定した reason を使え、不正設定による一時的な resource ownership を避けられる。
+起動処理とテストで同じエラー理由を扱える。不正な設定のままリソースを確保してしまうことも防げる。

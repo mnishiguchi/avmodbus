@@ -1,17 +1,17 @@
-# 0001: Modbus ライブラリとサンプル application を分離する
+# 0001: ライブラリとサンプルアプリを分ける
 
 ## 背景
 
-Modbus 実装が複数 transport、Client / Server、各種 Function Code へ広がり、serial 通信のサンプルから
-独立して保守する必要が生じた。
+Modbus の実装が複数の通信方式や Client / Server、さまざまな Function Code に対応したため、
+シリアル通信のサンプルとは別に保守できる構成が必要になった。
 
 ## 決定
 
-- repository root を `avmodbus` library とする
-- Mix application を `:avmodbus`、namespace を `AVModbus` とする
-- runnable AtomVM application は `examples/hello_atomvm_modbus` に置く
-- GPIO、firmware、polling など board 固有の設定は example 側で管理する
+- リポジトリのルートを `avmodbus` ライブラリとする
+- Mix アプリケーション名を `:avmodbus`、モジュール名の接頭辞を `AVModbus` とする
+- 実行できる AtomVM サンプルを `examples/hello_atomvm_modbus` に置く
+- GPIO、ファームウェア、定期読み取りなど、基板固有の設定はサンプル側で管理する
 
 ## 影響
 
-protocol core を hardware から独立して再利用・テストできる。実機固有の手順は library API に持ち込まない。
+プロトコル処理をハードウェアに依存せず再利用・テストできる。実機固有の手順をライブラリの API に持ち込まずに済む。

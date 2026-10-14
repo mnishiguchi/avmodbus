@@ -1,21 +1,21 @@
-# 0020: async request の受付を同期して resource 上限を守る
+# 0020: 非同期要求の受付時にリソース上限を確認する
 
 ## 背景
 
-`send_request/4` が `GenServer.cast` で request を投入すると、Client が `:max_queue` を確認する前に
-mailbox へ message を積める。serial Client では deadline arbiter も受付結果より先に生成されるため、
-内部 queue だけを制限しても library が作る process 数の上限にならない。
+`send_request/4` が `GenServer.cast` で要求を送ると、Client が `:max_queue` を確認する前に
+メールボックスへメッセージを積めてしまう。シリアル Client では期限監視用のプロセスも受付前に生成されるため、
+内部キューだけを制限しても、ライブラリが作るプロセス数までは制限できない。
 
 ## 決定
 
-- Serial / TCP とも、async request は短い synchronous admission で capacity を確認する
-- 受付後の wire transaction と result notification は非同期のままにする
-- 受付成功時だけ reference を返し、完了 result を同じ reference で一度通知する
-- `:queue_full` や `:closed` は reference を作らず、受付結果として直接返す
-- serial deadline arbiter は受付済みの active / queued request にだけ生成する
-- queue の上限と deadline の扱いは ADR 0016 / 0017 を維持する
+- シリアル / TCP とも、非同期要求の受付だけは同期処理にして空き容量を確認する
+- 受付後の通信と結果の通知は非同期のままにする
+- 受付に成功した場合だけ参照値を返し、処理結果を同じ参照値で一度だけ通知する
+- `:queue_full` や `:closed` は参照値を作らず、受付時に直接返す
+- シリアルの期限監視用プロセスは、受付済みで処理中または待機中の要求にだけ生成する
+- キューの上限と処理期限については ADR 0016 / 0017 の方針を維持する
 
 ## 影響
 
-単一 producer は一方的な cast で Client mailbox や helper process を増やせない。
-caller は `send_request/4` の戻り値を reference と error に分け、明示的に backpressure を処理する。
+一つの送信元から `cast` を送り続けても、Client のメールボックスや補助プロセスが無制限に増えない。
+呼び出し側は `send_request/4` の戻り値を参照値とエラーで区別し、混雑時の処理を決められる。

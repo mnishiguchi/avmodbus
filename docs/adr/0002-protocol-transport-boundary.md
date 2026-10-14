@@ -2,17 +2,17 @@
 
 ## 背景
 
-Modbus の PDU と framing は、AtomVM の UART / socket lifecycle から独立している。
+Modbus の PDU とフレーム処理は、AtomVM の UART やソケットの起動・終了処理とは切り離せる。
 
 ## 決定
 
-- `AVModbus.PDU` は Function Code の encode / decode と validation だけを扱う
-- RTU / CRC、ASCII / LRC、TCP / MBAP はそれぞれ専用 module に置く
-- AtomVM `:uart` access は `AVModbus.UART` に閉じ込める
-- connection lifecycle は codec から分離する
-- protocol tests は通常の BEAM 上で実行可能にする
-- Linux / Nerves 固有の runtime dependency は追加しない
+- `AVModbus.PDU` は Function Code のエンコード・デコードと検証だけを扱う
+- RTU / CRC、ASCII / LRC、TCP / MBAP の処理をそれぞれ専用モジュールに置く
+- AtomVM の `:uart` へのアクセスは `AVModbus.UART` にまとめる
+- 接続の開始・終了処理をコーデックから分離する
+- プロトコルのテストは通常の BEAM 上でも実行できるようにする
+- Linux / Nerves 固有の実行時依存パッケージは追加しない
 
 ## 影響
 
-protocol correctness と hardware integration を別々に検証でき、transport を変更しても PDU core を共有できる。
+プロトコルの正しさと実機との接続を別々に検証できる。通信方式を変更しても PDU の処理を共通で利用できる。

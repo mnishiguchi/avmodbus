@@ -1,34 +1,33 @@
-# 0007: Modbus TCP connection を独立 process で隔離する
+# 0007: Modbus TCP の接続ごとに処理を分ける
 
 ## 背景
 
-同じ connection の request order を保ちながら、複数 connection は互いに停止させず処理する必要がある。
+一つの接続内では要求の順番を守りつつ、別の接続は互いの処理にできるだけ影響されずに動作させたい。
 
 ## 決定
 
-- listener が listen socket、admission、connection metadata を所有する
-- accepted socket は connection process へ ownership transfer する
-- connection process は active socket の bounded broker と wire order を保つ protocol worker を持つ
-- broker は slow handler 中も受信し、worker へ未配送の binary が既定 2,048 bytes を超えた connection を閉じる
-- active socket mailbox、worker が保持する data、runtime socket buffer はこの上限に含めない
-- broker は isolated handler の lifecycle owner でもあり、connection 終了時に worker と handler を直接 `:kill` する
-- listener は handler 実行前に ownership を登録し、broker の forced death 時も fallback owner として handler を停止する
-- listener は eviction / shutdown 時に broker へ停止を要求し、全 broker で共有する 1 秒の graceful deadline 後は
-  `:kill`、さらに 100 ms の shared deadline 後は待機を終了する
-- socket handoff が失敗した場合は、すでに admit した broker も停止する
-- AtomVM 0.7 は `active: :once` を提供せず passive receive timeout も保証しないため、active broker を使う
-- protocol worker は同じ connection の request を順番に処理し、connection 間は並行動作する
-- 完全な request の受信だけを activity とし、partial byte で idle deadline を延長しない
-- connection 上限では、最も多く保持する address group の最古 connection を evict する
-- allowlist は address と IPv4 / IPv6 prefix を扱う
-- invalid MBAP stream は connection を閉じる
-- authorization と handler isolation は `AVModbus.Server` に委譲する
+- リスナーが待ち受けソケット、接続の受け付け、接続情報を管理する
+- 受け付けたソケットの所有権を接続ごとのプロセスへ移す
+- 接続ごとのプロセスに、受信データを制限するブローカーと、要求を受信順に処理するワーカーを置く
+- ハンドラーが遅い間もブローカーは受信を続け、ワーカーへ渡す前のデータが既定の 2,048 バイトを超えたら接続を閉じる
+- この上限に、active モードのソケットのメールボックス、ワーカーが保持するデータ、ランタイムのソケットバッファーは含めない
+- ブローカーはハンドラーの終了も管理し、接続終了時にはワーカーとハンドラーを直接 `:kill` する
+- リスナーはハンドラーの実行前に所有関係を記録し、ブローカーが強制終了した場合も代わりにハンドラーを停止する
+- リスナーは接続の入れ替えや終了時にブローカーへ停止を要求する。全ブローカー共通の 1 秒の猶予を過ぎたら
+  `:kill` し、さらに共通の 100 ms を過ぎたら終了待ちを打ち切る
+- ソケットの所有権を移せなかった場合は、受け付け済みのブローカーも停止する
+- AtomVM 0.7 は `active: :once` に対応せず、passive モードの受信タイムアウトも保証されないため、active モードのブローカーを使う
+- ワーカーは同じ接続内の要求を順番に処理し、接続同士は並行して動作する
+- 完全な要求を受信した場合だけ通信があったとみなし、途中までのデータではアイドル期限を延長しない
+- 接続数が上限に達したら、接続数が最も多いアドレスグループから最も古い接続を切断する
+- 接続許可リストはアドレスと IPv4 / IPv6 のプレフィックスに対応する
+- 不正な MBAP データを受信したら接続を閉じる
+- アクセス許可とハンドラーの分離は `AVModbus.Server` に任せる
 
 ## 影響
 
-遅い peer と速すぎる peer の影響を connection 内に閉じ込め、connection 数と broker 内の未配送 data を制限できる。
-active socket を使う runtime では、`max_buffer` だけで connection 全体の memory を厳密には制限できない。
-connection の終了後に slow handler が orphan process として残らない。handler 自身が `trap_exit` を有効にしても、
-connection lifecycle から独立できない。
-応答不能な broker があっても listener shutdown / eviction は有限時間で進む。VM 全体または listener 自身を
-強制終了した場合までは、この ownership contract の対象外とする。
+遅い接続や大量に送信する接続の影響を抑え、接続数とブローカーが保持する未配送データを制限できる。
+ただし、active モードのソケットでは `max_buffer` だけで接続全体のメモリ使用量を厳密に制限することはできない。
+接続が終了すると、`trap_exit` を有効にしたハンドラーも残さず終了する。
+応答しないブローカーがあっても、接続の入れ替えやサーバー停止は有限時間で進む。
+VM 全体やリスナー自身が強制終了した場合は、この保証の対象外とする。

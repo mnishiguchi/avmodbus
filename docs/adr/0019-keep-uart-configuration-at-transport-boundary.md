@@ -1,20 +1,20 @@
-# 0019: UART hardware configuration を transport boundary に置く
+# 0019: UART の設定はトランスポート層で管理する
 
 ## 背景
 
-peripheral、pin、baud、parity などを Client / Server option に重複させると、protocol policy と board wiring が
-混在し、reopen state も複数箇所に分散する。
+UART 番号、ピン、通信速度、パリティなどを Client / Server のオプションに重複して持たせると、
+プロトコルの設定と基板の配線設定が混ざり、再接続の状態管理も分散してしまう。
 
 ## 決定
 
-- built-in `AVModbus.UART` の hardware 設定は application configuration に置く
-- managed Client / Server に同じ UART option を追加しない
-- serial transport は instance 設定を受け取る `open/1` を必須 callback とする
-- runtime 選択が必要な application は UART handle または custom transport を注入する
-- injected handle の close / reopen は application が所有する
-- managed reopen を保つ runtime override が必要になった場合は transport configuration として設計する
+- 標準の `AVModbus.UART` のハードウェア設定はアプリケーションの設定ファイルに置く
+- 管理対象の Client / Server に同じ UART オプションを重複して追加しない
+- シリアルトランスポートでは個別設定を受け取る `open/1` を必須コールバックとする
+- 実行時に UART を選びたいアプリケーションは、UART ハンドルか独自トランスポートを渡す
+- 渡された UART ハンドルの終了・再接続はアプリケーション側で管理する
+- 管理付きの再接続を保ったまま実行時に設定を切り替える必要があれば、トランスポートの設定として設計する
 
 ## 影響
 
-固定 board profile は小さく一貫した設定で再接続できる。動的な複数 UART の用途では application が
-ownership と recovery を明示する。
+固定の基板構成では、少ない設定項目で一貫して再接続できる。複数の UART を動的に扱う場合は、
+アプリケーションが所有権と復旧方法を明示する。

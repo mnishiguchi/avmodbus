@@ -1,19 +1,19 @@
-# 0016: serial async result は deadline arbiter で一度だけ通知する
+# 0016: シリアル通信の非同期結果は期限に従って一度だけ通知する
 
 ## 背景
 
-serial Client は transaction 中に次の mailbox message を処理しないため、queue 内の async request は
-deadline を過ぎても timeout 通知が遅れる可能性がある。
+シリアル Client は通信処理中に次のメールボックスメッセージを処理しない。そのため、待機中の非同期要求は
+期限を過ぎてもタイムアウト通知が遅れる場合がある。
 
 ## 決定
 
-- 正の timeout を持つ async request ごとに軽量な deadline arbiter を起動する
-- arbiter は transaction result と timeout の先着一方だけを recipient へ送る
-- deadline 後の late result は破棄する
-- zero-timeout の即時確認 path は維持する
-- UART ownership、serialization、reconnect は Client process に残す
-- TCP は既存の per-request timer を使う
+- 正のタイムアウト値がある非同期要求ごとに、期限を監視する軽量プロセスを起動する
+- 監視プロセスは通信結果とタイムアウトのうち、先に確定した一方だけを送信先へ通知する
+- 期限を過ぎて届いた結果は破棄する
+- タイムアウト 0 の即時確認処理は維持する
+- UART の所有、要求の直列処理、再接続は Client プロセスに残す
+- TCP は従来どおり要求ごとのタイマーを使う
 
 ## 影響
 
-UART ownership を変えず、deadline 内に exactly-once result を通知できる。
+UART の所有方法を変えず、期限に従って結果を重複なく一度だけ通知できる。

@@ -1,19 +1,19 @@
-# 0008: Client と Server handler の戻り値を統一する
+# 0008: Client と Server ハンドラーの戻り値を統一する
 
 ## 背景
 
-gateway が downstream Client の結果を upstream Server へ返す際、transport ごとに error 形式が異なると
-変換処理が必要になる。
+ゲートウェイで下流の Client の結果を上流の Server へ返すとき、通信方式ごとにエラー形式が違うと
+余分な変換処理が必要になる。
 
 ## 決定
 
 - 読み取り成功は `{:ok, value}`、書き込み成功は `:ok`
-- Modbus exception は `{:error, {:exception, reason}}`
-- request と一致しない response は `{:error, {:invalid_response, pdu}}`
-- unknown exception code は byte のまま保持する
-- timeout と closed connection は `{:error, :timeout}` / `{:error, :closed}`
-- exception 名と code の変換 API を提供する
+- Modbus の例外応答は `{:error, {:exception, reason}}`
+- 要求と一致しない応答は `{:error, {:invalid_response, pdu}}`
+- 未知の例外コードはバイト値のまま保持する
+- タイムアウトと切断は `{:error, :timeout}` / `{:error, :closed}`
+- 例外名とコードの相互変換 API を提供する
 
 ## 影響
 
-RTU / ASCII / TCP で同じ pattern matching を使え、gateway は結果をそのまま転送できる。
+RTU / ASCII / TCP で同じパターンマッチが使えるため、ゲートウェイでの結果の受け渡しが簡単になる。

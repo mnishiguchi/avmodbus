@@ -1,19 +1,20 @@
-# 0012: retry は idempotent read に限定する
+# 0012: 自動リトライは安全な読み取り要求に限定する
 
 ## 背景
 
-read の一時的な timeout は再試行できるが、response を失った write を再送すると操作が重複する可能性がある。
+読み取りの一時的なタイムアウトは再試行できる。一方、書き込み後の応答だけを失った場合に再送すると、
+同じ操作が二重に実行されるおそれがある。
 
 ## 決定
 
-- retry は caller が明示した場合だけ行う
-- standard read-only function と device identification だけを許可する
-- write、read/write、diagnostics、custom function は拒否する
-- `:timeout` と `:closed` だけを retry 対象にする
-- Modbus exception、invalid response、validation error は再試行しない
-- attempt 間は bounded exponential backoff とする
-- `retry_request/4` を generic entrypoint として維持する
+- 呼び出し側が明示的に指定した場合だけリトライする
+- 標準の読み取り専用機能と機器情報の取得だけを対象とする
+- 書き込み、読み書きの組み合わせ、診断、独自の機能コードは対象外とする
+- `:timeout` と `:closed` の場合だけリトライする
+- Modbus の例外応答、不正な応答、入力値の検証エラーでは再試行しない
+- 試行の間隔には上限付きの指数バックオフを使う
+- 共通の呼び出し口として `retry_request/4` を維持する
 
 ## 影響
 
-polling の一時障害には対応しつつ、side effect のある request を自動 replay しない。
+定期的な読み取りの一時障害には対応しつつ、副作用がある要求の自動再送は避けられる。

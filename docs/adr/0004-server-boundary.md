@@ -1,18 +1,18 @@
-# 0004: Server application の境界を transport から分離する
+# 0004: Server の処理と通信方式を分離する
 
 ## 背景
 
-framing、UART lifecycle、application data model を同じ process に置くと、通信処理と機器ロジックが密結合になる。
+フレーム処理、UART の起動・終了、アプリケーションのデータ管理を同じプロセスに集めると、通信処理と機器固有の処理が密結合になる。
 
 ## 決定
 
-- `AVModbus.Server` を transport-independent な request processor とする
-- handler は function または `{module, argument}` で注入する
-- handler の timeout / crash は Modbus exception に変換する
-- authorization と device identification は Server policy として扱う
-- `AVModbus.Memory` は optional な sparse in-memory handler とする
-- serial diagnostics は serial Server が所有する
+- `AVModbus.Server` は通信方式に依存せず要求を処理する
+- ハンドラーは関数または `{module, argument}` で指定する
+- ハンドラーのタイムアウトや異常終了は Modbus の例外応答に変換する
+- アクセス許可と機器情報の取得は Server 側の方針として扱う
+- `AVModbus.Memory` は必要に応じて使える、メモリ上の簡易ハンドラーとする
+- シリアル通信の診断機能はシリアル Server が管理する
 
 ## 影響
 
-application 固有ロジックを transport lifecycle から分離し、hardware なしで Server semantics をテストできる。
+アプリケーション固有の処理を通信の開始・終了から切り離し、実機がなくても Server の動作をテストできる。

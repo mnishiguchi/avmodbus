@@ -51,27 +51,21 @@ defmodule AVModbus.MixProject do
   defp docs do
     [
       main: "readme",
-      extras:
-        [
-          {"README.md", [filename: "readme", title: "AVModbus"]},
-          {"docs/MODBUS_BASICS.md", [filename: "modbus-basics", title: "Modbus の基礎"]},
-          {"docs/GETTING_STARTED.md", [filename: "getting-started", title: "Getting Started"]},
-          {"docs/DEVELOPMENT.md", [filename: "development", title: "開発者ガイド"]},
-          "CHANGELOG.md",
-          "LICENSE",
-          "docs/ARCHITECTURE.md",
-          "docs/ROADMAP.md",
-          "docs/ARTIFACT_SIZE.md",
-          "docs/MEMORY_FOOTPRINT.md",
-          "docs/COMPATIBILITY_MATRIX.md",
-          "docs/RELEASE_CANDIDATE_CHECKLIST.md",
-          "docs/ATOMVM_TCP_HARD_LIMIT.md",
-          {"docs/adr/README.md", [filename: "adr", title: "Architecture decisions"]},
-          {"docs/worklog/README.md", [filename: "worklog", title: "Worklog"]},
-          {"examples/hello_atomvm_modbus/README.md",
-           [filename: "atomvm-example", title: "AtomVM example"]}
-        ] ++ Path.wildcard("docs/adr/0*.md"),
-      source_ref: "v#{@version}",
+      extras: [
+        {"README.md", [filename: "readme", title: "AVModbus"]},
+        {"docs/modbus-basics.md", [filename: "modbus-basics", title: "Modbus の基礎"]},
+        {"docs/getting-started.md", [filename: "getting-started", title: "はじめ方"]},
+        {"examples/hello_atomvm_modbus/README.md",
+         [filename: "atomvm-example", title: "XIAO ESP32-C5 で試す"]},
+        {"docs/development/hardware-tests.md",
+         [filename: "atomvm-example-development", title: "実機での追加検証"]},
+        {"docs/development.md", [filename: "development", title: "開発者ガイド"]},
+        {"docs/architecture.md", [filename: "architecture", title: "アーキテクチャ"]},
+        {"docs/compatibility.md", [filename: "compatibility", title: "動作確認済みの構成"]},
+        "CHANGELOG.md",
+        "LICENSE"
+      ],
+      source_ref: "main",
       groups_for_modules: [
         "Clients and servers": [
           AVModbus,

@@ -1,18 +1,18 @@
-# 0017: TCP Client の待機 queue を制限する
+# 0017: TCP Client の待機キューを制限する
 
 ## 背景
 
-`:max_pending` を超えた未送信 request が無制限に溜まると、AtomVM device の memory と timer を使い続ける。
+`:max_pending` の上限を超えた未送信の要求が無制限に溜まると、AtomVM 上でメモリとタイマーを使い続けてしまう。
 
 ## 決定
 
-- 未送信 request を `:max_queue` で制限する
+- 未送信の要求数を `:max_queue` で制限する
 - 既定値は 64、`0..65_536` または明示的な `:infinity` を許可する
-- pending slot があれば `max_queue: 0` でも直接送信できる
-- queue が満杯なら `{:error, :queue_full}` を即時返す
-- 既存 request は追い出さず、capacity 回復後は新しい request を受け付ける
-- `:queue_full` は retry しない
+- 送信可能な空きがあれば、`max_queue: 0` でも直接送信できる
+- キューが満杯なら `{:error, :queue_full}` をすぐに返す
+- 受け付け済みの要求は破棄せず、空きができたら新しい要求を受け付ける
+- `:queue_full` ではリトライしない
 
 ## 影響
 
-memory 使用量に上限を設け、caller が明示的に backpressure を処理できる。
+内部キューによるメモリ使用量を制限し、呼び出し側で混雑時の処理を判断できる。

@@ -1,11 +1,51 @@
-# AtomVM での memory 使用量
+# リソース計測
+
+AtomVM application のファームウェアサイズと実機 memory 使用量を、同じ条件で継続比較するための記録です。
+
+## ファームウェアサイズ
+
+AVModbus の artifact regression は、pinned toolchain と既定 configuration で build した
+`examples/hello_atomvm_modbus/sample_app.avm` を基準にします。
+`MODBUS_MEASURE_MEMORY=true`、`MODBUS_HEALTH_INTERVAL_MS > 0`、または
+`MODBUS_RESOURCE_PROBE=true` の diagnostic build はこの budget の対象外です。
+
+- 基準値: 147,536 bytes
+- 増加を検知する上限: 147,736 bytes
+- 余裕: 200 bytes（約 0.1%）
+- build SHA-256: `7a995704650c1bd5e7830d6b51c010a0a05b0ecd8644a32cbb4652a59aa39e8a`
+
+TCP listener の handler fallback ownership、bounded shutdown、handoff failure cleanup を追加した結果、
+直前の 144,508-byte baseline から 3,028 bytes 増加しました。AtomVM compatibility check、host test、
+pymodbus interoperability、短時間 soak、ESP32-C5 resource probe と実 RS485 smoke test を確認し、
+増分に従来と同じ headroom を加えて budget を更新しています。
+
+次の command は production artifact を再 build し、budget を超えた場合に失敗します。
+
+```sh
+cd examples/hello_atomvm_modbus
+MIX_ENV=prod mix atomvm.size
+```
+
+artifact path と budget は、個別検証用に環境変数で上書きできます。
+
+```sh
+AVMODBUS_AVM_PATH=/tmp/sample_app.avm \
+AVMODBUS_AVM_BUDGET_BYTES=147736 \
+../../scripts/check_avm_size.sh
+```
+
+toolchain、compile-time configuration、example application の変更も artifact size に影響します。
+上限を更新する場合は、意図した増加であることを確認し、新しい基準値、上限、build hash を
+この文書と worklog に記録します。
+
+## AtomVM での memory 使用量
 
 この資料は、実機の memory 使用量を継続的に比較する開発者向けです。AVModbus の memory 使用量は、
 Seeed Studio XIAO ESP32-C5 と AtomVM
 `v0.7.0-beta.0` 上で、role startup 直前と startup 後の ESP32 heap、および managed process の
 `process_info/2` を記録します。
 
-## 計測方法
+### 計測方法
 
 memory probe を有効にした production example を role ごとに clean build し、flash 後の
 `modbus_memory` line を取得します。
@@ -35,7 +75,7 @@ probe は role startup 前後で GC を実行し、startup 後 100 ms 待って�
 free heap delta は managed process heap だけでなく、role module の load、UART resource、driver state も
 含む deployed-role の増分です。`process_info/2` の `:memory` は個別 BEAM process の推定値です。
 
-## 2026-10-12 基準値
+### 2026-10-12 基準値
 
 共通条件は RTU、9,600 baud、UART1、GPIO23 TX、GPIO24 RX、response 待機中または idle server です。
 
@@ -56,7 +96,7 @@ free heap delta は managed process heap だけでなく、role module の load�
 toolchain、firmware、board、compile-time configuration、transport mode が変わる場合は別 baseline として
 記録します。diagnostic probe build は通常の artifact-size budget 対象には含めません。
 
-## 2026-10-13 TCP loopback 接続数比較
+### 2026-10-13 TCP loopback 接続数比較
 
 official AtomVM `v0.7.0-beta.0` image 上で、同一 board 内の TCP Server と managed Client を loopback 接続し、
 network stack の warm-up 後に 1..4 connections を各 3 cycle 計測しました。各 Client は idle 接続後、
@@ -74,24 +114,24 @@ socket runtime state を含む deployed probe 全体の差です。active snapsh
 測定期間中の厳密な peak ではありません。全 12 measured cycles で process 数は 4 に戻り、free heap は
 probe の 32 KiB recovery bound 内に回復しました。2 connections 以上では AtomVM socket driver の
 `event_queue` warning も観測したため、4 は確認済みの最大値であり、一般的な安全上限や保証値ではありません。
-詳細は [TCP リソース上限レポート](ATOMVM_TCP_HARD_LIMIT.md) を参照してください。
+詳細は [TCP リソース上限レポート](../limitations.md) を参照してください。
 
 2026-10-14 の lifecycle hardening 後にも 4 connections を 3 cycle 再実行し、process 数は
 `4 / 28 / 61 / 4` に回復しました。idle 時の free heap 減少は 16,928–17,560 B、active snapshot は
 41,144–43,368 B で、前日の測定と同程度でした。
 
-## 長時間検証
+### 長時間検証
 
 startup 間の差分ではなく稼働中の推移を観測する場合は、example の
 `MODBUS_HEALTH_INTERVAL_MS` を正の値にします。`modbus_health` line は uptime、connection state、
 free / minimum free heap、binary memory、process count、managed process memory、mailbox length を
-定期出力します。設定方法は [example README](../examples/hello_atomvm_modbus/README.md#実機-soak-test-の状態出力)
+定期出力します。設定方法は [実機の追加検証手順](hardware-tests.md#実機-soak-test-の状態出力)
 を参照してください。
 
 health monitor は自身だけを GC し、managed Modbus process の heap には介入しません。したがって、
 process memory や mailbox の継続的な増加を soak run 中に観測できます。
 
-## 2026-10-10 実 RS485 基準値
+### 2026-10-10 実 RS485 基準値
 
 2 台の XIAO ESP32-C5 と 2 台の HW-519 を RS485 で接続し、RTU、9,600 baud、8N1、unit ID 1、
 function `0x03`、client polling interval 100 ms、health interval 10 秒で実行しました。client を 5 分、
@@ -105,7 +145,7 @@ server を 5 分 30 秒観測し、client は 1,623 request 成功、failure 0 �
 client の binary memory は 0 B、server は 35 B で安定しました。この 5 分 baseline は telemetry と
 real RS485 traffic の短時間安定性確認であり、roadmap の長時間 soak 完了とは扱いません。
 
-## TCP resource probe をバージョン間で比較する
+### TCP resource probe をバージョン間で比較する
 
 既存の `SampleApp.ResourceProbe` が出す `modbus_resource_probe cycle=...` 行をログに保存してから、
 ホスト側の標準ライブラリだけで動くスクリプトで CSV に変換します。

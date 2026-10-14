@@ -1,18 +1,18 @@
-# 0018: managed Client の既定 timeout を起動時に設定する
+# 0018: Client の既定タイムアウトを起動時に設定する
 
 ## 背景
 
-すべての call site で同じ timeout を指定せず、接続先ごとの応答時間方針を一箇所に置きたい。
+すべての呼び出しで同じタイムアウトを指定せず、接続先ごとの待ち時間の設定を一箇所にまとめたい。
 
 ## 決定
 
-- serial / TCP Client の `:timeout` option を既定 request deadline とする
+- シリアル / TCP Client の `:timeout` オプションを要求の既定タイムアウトとする
 - 既定値は 1,000 ms とし、起動時は正の値だけを許可する
-- request 単位の `timeout:` は起動時設定を上書きする
-- deadline は API submission から数え、serial mailbox / TCP queue の待ち時間を含める
-- unmanaged UART API は従来の 1,000 ms を維持する
-- request 単位の 0 ms timeout は即時確認用として維持する
+- 要求ごとの `timeout:` は起動時の設定を上書きする
+- 処理期限は API の呼び出し時から数え、シリアルのメールボックスや TCP キューでの待ち時間も含める
+- 管理対象外の UART API は従来の 1,000 ms を維持する
+- 要求ごとのタイムアウト 0 ms は即時確認用として維持する
 
 ## 影響
 
-既存 behavior を変えず、Client 単位と request 単位の両方で deadline を設定できる。
+従来の動作を変えずに、Client ごとにも要求ごとにもタイムアウトを設定できる。
