@@ -73,6 +73,7 @@
 | 2026-10-14 | pre-handoff shutdown / eviction、handoff failure、forced broker death、複数停止不能 broker を回帰テストし、TCP listener cleanup を shared deadline で bounded 化 |
 | 2026-10-14 | slow-handler TCP burst の broker / worker resource を6回標本化し、pymodbus / libmodbus interoperability を独立 CI job に追加 |
 | 2026-10-14 | lifecycle hardening 後の ESP32-C5 4-connection resource probe を3 cycle再実行。各回 process count `4 / 28 / 61 / 4` に回復し `result=ok` |
+| 2026-10-14 | slow eviction 中の request / handler lifecycle を回帰テストし、pymodbus 3.15.0 / libmodbus 3.1.11 の TCP・PTY suite を固定 2 seed で再確認 |
 
 ## 現在の検証状況
 
@@ -307,8 +308,10 @@
 - host 227 tests / 6 properties、coverage 84.71%、pymodbus TCP / RTU / ASCII 双方向
   241 tests / 6 properties、AtomVM default / workflow / resource probe compatibility build が成功。
   5 秒 combined soak は process count 127 → 127、RTU / ASCII / TCP は 832 / 832 / 830 transaction を完了
-- libmodbus は local host に system package がないため再実行せず、Ubuntu CI job で `libmodbus-dev` を導入して
-  pymodbus 3.15.0 とともに検証する構成を追加
+- system へ install せず `libmodbus` 3.1.11 package を一時展開し、pymodbus 3.15.0 と合わせた
+  TCP / RTU / ASCII external suite 18 tests を固定 seed `12345` / `54321` で再実行。両方 failure 0
+- `libmodbus` peer の prerequisite / C build failure が `setup_all` の invalid tests として exit 0 になる
+  false-green path を修正し、明示的な test failure / exit 2 になることを negative-path で確認
 - lifecycle hardening 後の ESP32-C5 4-connection probe は 3 measured cycle とも成功。idle free-heap 減少は
   16,928–17,560 bytes、active snapshot は 41,144–43,368 bytes、cleanup 後は `-532..+148 bytes` の差で回復
 - probe 後は Client board を通常 RTU image に復元し、接続済み Server から holding register read を 4 回確認

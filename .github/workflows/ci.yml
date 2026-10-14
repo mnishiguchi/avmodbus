@@ -20,6 +20,8 @@ jobs:
           version-type: strict
 
       - run: mix deps.get
+      - name: Validate TCP resource report parser
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - run: mix format --check-formatted
       - run: mix test --cover
 
@@ -75,11 +77,14 @@ jobs:
 
       - run: mix deps.get
 
-      - name: Verify TCP, RTU, and ASCII interoperability
+      - name: Verify TCP, RTU, and ASCII interoperability (two seeds)
         env:
           LIBMODBUS_INTEROP: '1'
           PYMODBUS_PYTHON: ${{ github.workspace }}/.venv/bin/python
         run: |
-          mix test --include interop --include libmodbus \
-            test/avmodbus/pymodbus_interop_test.exs \
-            test/avmodbus/libmodbus_interop_test.exs
+          for seed in 12345 54321; do
+            echo "Running independent Modbus peers with ExUnit seed=$seed"
+            mix test --seed "$seed" --include interop --include libmodbus \
+              test/avmodbus/pymodbus_interop_test.exs \
+              test/avmodbus/libmodbus_interop_test.exs
+          done

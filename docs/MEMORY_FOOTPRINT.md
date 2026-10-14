@@ -104,3 +104,28 @@ server を 5 分 30 秒観測し、client は 1,623 request 成功、failure 0 �
 
 client の binary memory は 0 B、server は 35 B で安定しました。この 5 分 baseline は telemetry と
 real RS485 traffic の短時間安定性確認であり、roadmap の長時間 soak 完了とは扱いません。
+
+## TCP resource probe をバージョン間で比較する
+
+既存の `SampleApp.ResourceProbe` が出す `modbus_resource_probe cycle=...` 行をログに保存してから、
+ホスト側の標準ライブラリだけで動くスクリプトで CSV に変換します。
+
+```sh
+# ESP32 の monitor 出力を /tmp/avmodbus-tcp-probe.log に保存した後
+python3 scripts/summarize_tcp_resources.py \
+  --label avmodbus-20261014 --atomvm-ref v0.7.0-beta.0+git.8d3e051 \
+  --device 'XIAO-ESP32-C5 loopback' \
+  --output /tmp/avmodbus-tcp-resource-history.csv --append \
+  /tmp/avmodbus-tcp-probe.log
+```
+
+入力ログは `result=ok cycles=N` と N 個の連続した cycle を含む必要があります。
+`result=error`、不完全な実行、重複 cycle、壊れた CSV header は失敗扱いとし、不確かな baseline を保存しません。
+
+CSV には firmware label、AtomVM reference、device、cycle、connection 数、baseline / idle /
+active / cleanup の process count・free heap・largest free block と、free heap の減少量を記録します。
+複数実行を `--append` でまとめ、変更前後を同じ条件で比較してください。
+
+**重要:** これらの値は probe 実行中の snapshot であり、瞬間的な peak の保証ではありません。
+また、loopback 測定値には server だけでなく client と AtomVM runtime の負荷が含まれます。
+検証範囲を超える接続数で probe を実行しないでください。

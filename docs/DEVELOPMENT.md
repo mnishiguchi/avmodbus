@@ -318,3 +318,14 @@ CI の `interoperability` job では `pymodbus==3.15.0` と `libmodbus-dev` を�
 root package の `:atomvm` dependency は optional / `runtime: false` です。AtomVM supported API metadata を
 使った build-time validation のためだけに利用します。`StreamData` も property test 専用です。
 AVModbus の firmware runtime dependency には含まれません。
+
+## Release 前の追加チェック
+
+- TCP listener が eviction 中でも、待機した request が handler 登録・応答・cleanup まで進む
+  host regression は通常の `mix test` に含めています。
+- 独立 peer との interoperability は CI の専用 job で **2 seed** を使って繰り返します。
+  完了判定には実際の GitHub Actions の結果を確認してください。
+- AtomVM TCP resource の記録・比較は [Memory footprint](MEMORY_FOOTPRINT.md) の
+  `scripts/summarize_tcp_resources.py` を参照してください。
+- 追加 hardware の実績と未検証範囲は [Compatibility matrix](COMPATIBILITY_MATRIX.md) へ記録します。
+- Hex 公開を含めない事前確認は [Pre-release checklist](RELEASE_CANDIDATE_CHECKLIST.md) を使います。

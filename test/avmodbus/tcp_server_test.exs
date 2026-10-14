@@ -383,6 +383,100 @@ defmodule AVModbus.TCPServerTest do
     end
   end
 
+  test "request queued during slow eviction registers its handler and cleans up" do
+    parent = self()
+
+    handler = fn
+      _unit_id, {:read_holding_registers, 22, 1} ->
+        send(parent, {:concurrent_handler, self()})
+
+        receive do
+          :release -> {:ok, [22]}
+        end
+
+      _unit_id, {:read_holding_registers, address, 1} ->
+        {:ok, [address]}
+    end
+
+    server = start_server(handler, connections: 2)
+    old_socket = connect(server)
+    assert eventually(fn -> TCPServer.status(server) == {:listening, 1} end)
+    [old_broker] = Map.keys(:sys.get_state(server).clients)
+    broker_monitor = Process.monitor(old_broker)
+
+    live_socket = connect(server)
+    assert eventually(fn -> TCPServer.status(server) == {:listening, 2} end)
+
+    assert exchange(live_socket, 21, 1, <<3, 0, 21, 0, 1>>) ==
+             {:ok, 21, 1, <<3, 2, 0, 21>>}
+
+    # A suspended broker is a deterministic slow victim: eviction must use its
+    # shared deadline and then force-terminate it before admitting a replacement.
+    :erlang.suspend_process(old_broker)
+    replacement_socket = connect(server)
+
+    # Observe the stop request in the suspended victim's mailbox. This proves
+    # that the listener is inside the bounded eviction wait without relying on
+    # a scheduler-sensitive sleep.
+    assert eventually(fn ->
+             case Process.info(old_broker, :messages) do
+               {:messages, messages} -> {TCPServer, :stop} in messages
+               _ -> false
+             end
+           end)
+
+    :ok = :gen_tcp.send(live_socket, read_frame(22, 22))
+
+    # Normal requests update listener activity before starting a handler. That
+    # call waits behind eviction; handler registration follows after it rather
+    # than racing around the listener's lifecycle bookkeeping.
+    assert eventually(fn ->
+             case Process.info(server, :messages) do
+               {:messages, messages} ->
+                 Enum.any?(messages, fn
+                   {:"$gen_call", _from, {:activity, _broker, _at}} -> true
+                   _ -> false
+                 end)
+
+               _ ->
+                 false
+             end
+           end)
+
+    assert_receive {:DOWN, ^broker_monitor, :process, ^old_broker, :killed}, 3_000
+    assert_receive {:concurrent_handler, handler_process}, 1_000
+    handler_monitor = Process.monitor(handler_process)
+
+    assert eventually(fn ->
+             Enum.any?(:sys.get_state(server).clients, fn
+               {_broker, %{handler: ^handler_process}} -> true
+               _entry -> false
+             end)
+           end)
+
+    send(handler_process, :release)
+    assert receive_frame(live_socket, 3_000) == {:ok, 22, 1, <<3, 2, 0, 22>>}
+    assert_receive {:DOWN, ^handler_monitor, :process, ^handler_process, :normal}, 1_000
+
+    assert exchange(replacement_socket, 23, 1, <<3, 0, 23, 0, 1>>) ==
+             {:ok, 23, 1, <<3, 2, 0, 23>>}
+
+    assert eventually(fn -> TCPServer.status(server) == {:listening, 2} end)
+    assert :gen_tcp.recv(old_socket, 0, 1_000) == {:error, :closed}
+
+    remaining_brokers = Map.keys(:sys.get_state(server).clients)
+    remaining_monitors = Enum.map(remaining_brokers, &{&1, Process.monitor(&1)})
+
+    :ok = :gen_tcp.close(live_socket)
+    :ok = :gen_tcp.close(replacement_socket)
+
+    for {broker, monitor} <- remaining_monitors do
+      assert_receive {:DOWN, ^monitor, :process, ^broker, :normal}, 1_000
+    end
+
+    assert eventually(fn -> TCPServer.status(server) == {:listening, 0} end)
+  end
+
   test "rapid admission and disconnect during eviction leaves the listener usable" do
     server =
       start_server(fn _unit_id, {:read_holding_registers, 0, 1} -> {:ok, [42]} end,

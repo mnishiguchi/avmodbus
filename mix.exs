@@ -63,6 +63,8 @@ defmodule AVModbus.MixProject do
           "docs/ROADMAP.md",
           "docs/ARTIFACT_SIZE.md",
           "docs/MEMORY_FOOTPRINT.md",
+          "docs/COMPATIBILITY_MATRIX.md",
+          "docs/RELEASE_CANDIDATE_CHECKLIST.md",
           "docs/ATOMVM_TCP_HARD_LIMIT.md",
           {"docs/adr/README.md", [filename: "adr", title: "Architecture decisions"]},
           {"docs/worklog/README.md", [filename: "worklog", title: "Worklog"]},

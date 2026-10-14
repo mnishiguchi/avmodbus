@@ -27,22 +27,12 @@ defmodule AVModbus.LibmodbusInteropTest do
 
   setup_all do
     peer = Path.join(Mix.Project.build_path(), "libmodbus_peer")
-    python = System.find_executable("python3") || flunk("python3 is required for RTU PTY tests")
-    {flags, 0} = System.cmd("pkg-config", ["--cflags", "--libs", "libmodbus"])
-
-    {output, status} =
-      System.cmd(
-        "cc",
-        ["-std=c11", "-Wall", "-Wextra", "-Werror", "-o", peer, @source] ++
-          String.split(flags),
-        stderr_to_stdout: true
-      )
-
-    if status != 0, do: flunk("could not build libmodbus peer: #{output}")
-    %{peer: peer, python: python}
+    python = System.find_executable("python3")
+    %{peer_result: build_peer(peer), python: python}
   end
 
-  test "AVModbus client interoperates with a libmodbus server", %{peer: peer} do
+  test "AVModbus client interoperates with a libmodbus server", context do
+    peer = peer!(context)
     port = free_port()
     {:ok, _peer_port} = start_peer_server(peer, port)
     {:ok, client} = Client.start_link(transport: :tcp, host: {127, 0, 0, 1}, port: port)
@@ -51,7 +41,8 @@ defmodule AVModbus.LibmodbusInteropTest do
     check_client(client)
   end
 
-  test "libmodbus client interoperates with an AVModbus server", %{peer: peer} do
+  test "libmodbus client interoperates with an AVModbus server", context do
+    peer = peer!(context)
     memory = start_supervised!({Memory, holding_registers: 1_000, coils: 100}, id: make_ref())
 
     server =
@@ -68,10 +59,9 @@ defmodule AVModbus.LibmodbusInteropTest do
     assert run_peer_client(peer, TCPServer.port(server)) == @expected
   end
 
-  test "AVModbus RTU client interoperates with a libmodbus server", %{
-    peer: peer,
-    python: python
-  } do
+  test "AVModbus RTU client interoperates with a libmodbus server", context do
+    peer = peer!(context)
+    python = python!(context)
     {:ok, pty} = PTYTransport.start_link(python)
     {:ok, peer_port} = start_peer_server(peer, PTYTransport.path(pty), :rtu)
     {:ok, client} = Client.start_link(PTYTransport, pty, transport: :rtu, gap: 0)
@@ -84,10 +74,9 @@ defmodule AVModbus.LibmodbusInteropTest do
     check_client(client, 3_000, peer_port)
   end
 
-  test "libmodbus RTU client interoperates with an AVModbus server", %{
-    peer: peer,
-    python: python
-  } do
+  test "libmodbus RTU client interoperates with an AVModbus server", context do
+    peer = peer!(context)
+    python = python!(context)
     {:ok, pty} = PTYTransport.start_link(python)
     {:ok, memory} = Memory.start_link(holding_registers: 1_000, coils: 100)
 
@@ -138,6 +127,45 @@ defmodule AVModbus.LibmodbusInteropTest do
 
     assert {:ok, <<_id, 0xFF, "LMB", _version::binary>>} =
              Client.request(client, 1, :report_server_id, timeout: timeout_ms)
+  end
+
+  defp peer!(%{peer_result: {:ok, peer}}), do: peer
+
+  defp peer!(%{peer_result: {:error, reason}}),
+    do: flunk("could not build libmodbus peer: #{reason}")
+
+  defp python!(%{python: python}) when is_binary(python), do: python
+  defp python!(_context), do: flunk("python3 is required for RTU PTY tests")
+
+  defp build_peer(peer) do
+    case {System.find_executable("pkg-config"), System.find_executable("cc")} do
+      {nil, _cc} ->
+        {:error, "pkg-config executable was not found"}
+
+      {_pkg_config, nil} ->
+        {:error, "C compiler executable was not found"}
+
+      {pkg_config, cc} ->
+        compile_peer(pkg_config, cc, peer)
+    end
+  end
+
+  defp compile_peer(pkg_config, cc, peer) do
+    case System.cmd(pkg_config, ["--cflags", "--libs", "libmodbus"], stderr_to_stdout: true) do
+      {flags, 0} ->
+        case System.cmd(
+               cc,
+               ["-std=c11", "-Wall", "-Wextra", "-Werror", "-o", peer, @source] ++
+                 String.split(flags),
+               stderr_to_stdout: true
+             ) do
+          {_output, 0} -> {:ok, peer}
+          {output, status} -> {:error, "C peer build exited #{status}: #{output}"}
+        end
+
+      {output, status} ->
+        {:error, "pkg-config exited #{status}: #{output}"}
+    end
   end
 
   defp start_peer_server(peer, target, transport \\ :tcp) do

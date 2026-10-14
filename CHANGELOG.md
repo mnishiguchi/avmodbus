@@ -1,5 +1,13 @@
 # 変更履歴
 
+## Unreleased
+
+- TCP slow-eviction 中に待機した request が handler 登録・応答・cleanup まで完了する host regression test を追加
+- 外部 Modbus peer interoperability の CI 実行を 2 つの固定 seed で反復
+- `libmodbus` peer の prerequisite / build failure が invalid test のまま CI を通らないよう修正
+- TCP resource probe の log-to-CSV 集計 script と host-only tests を追加
+- 実機 compatibility matrix と pre-release checklist を追加（公開・実機再検証は未実施）
+
 ## 0.1.0
 
 開発初期版:

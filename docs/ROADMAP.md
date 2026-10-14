@@ -59,6 +59,16 @@ Hex package としての公開は完了条件に含めません。
 
 module 分割は目的にせず、責務の変更や決定的な test の追加に必要な場合だけ行います。
 
+## 継続中の安定化チェック
+
+- [x] slow broker eviction 中に request を待機させ、後続の handler 登録・応答・cleanup を host でテストする
+- [x] interoperability CI を固定 seed 2 種類で反復実行する設定を追加する（CI 通過実績は別途確認）
+- [x] external peer の prerequisite / build failure を invalid test ではなく CI failure にする
+- [x] AtomVM TCP resource probe のログを build / runtime / device 別の CSV に変換する host tool を追加する
+- [x] [実機互換性表](COMPATIBILITY_MATRIX.md)と[リリース前 checklist](RELEASE_CANDIDATE_CHECKLIST.md)を整備する
+- [ ] GitHub Actions で新しい CI job の通過と再現性を確認する
+- [ ] 利用可能な別の hardware / runtime で追加検証し、確認済み構成を更新する
+
 ## 継続的な release gate
 
 - official AtomVM `release-0.7` image を更新した場合は、CI の 3 build variant、artifact size、
