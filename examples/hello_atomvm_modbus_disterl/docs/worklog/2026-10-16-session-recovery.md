@@ -70,6 +70,33 @@ modbus_disterl: complete 3 remote ping/pong messages
 `serial_dist_controller` の古い reader は `{serial_read_error, closed}` で終了するため、Server console には
 process crash report が 1 回表示された。link manager と application は動作を継続し、board 全体の reset は発生しなかった。
 
+次に Client を動作させたまま Server だけを hard reset した。再接続を観測しやすくするため、Client は
+`DISTERL_PING_COUNT=5`、`DISTERL_PING_DELAY_MS=10000` で build した。最初の ping/pong 成功後に
+Server を reset し、Client 自体は reset していない。
+
+reset が反映される直前に ping 2 が完了した後、Client は 2 回の poll timeout と Server の session 変更を
+検出した。
+
+```text
+modbus_disterl: received pong 2 from :b@modbus.local rtt_ms=872
+modbus_uart: poll failed :timeout; retrying
+modbus_uart: poll failed :timeout; retrying
+modbus_uart: peer session changed 3083848425 -> 4255276858; resetting stream
+```
+
+古い reader の `{serial_read_error, closed}` crash report に続いて、新しい distribution handshake が完了した。
+ping 3 は handshake を含めて 2,984 ms、ping 4 と 5 は 897 ms と 846 ms で応答し、5 回すべてを完了した。
+
+```text
+modbus_disterl: received pong 3 from :b@modbus.local rtt_ms=2984
+modbus_disterl: received pong 4 from :b@modbus.local rtt_ms=897
+modbus_disterl: received pong 5 from :b@modbus.local rtt_ms=846
+modbus_disterl: complete 5 remote ping/pong messages
+```
+
+以上により、Client-only と Server-only のどちらの reboot でも、surviving peer を再起動せずに transport と
+genuine distributed Erlang connection が自動復旧することを確認した。
+
 ## 調査中に見つかった問題
 
 - AtomVM 上の `atomvm:random/0` は 32-bit value の上位 bit が立つと negative integer になる場合があった。
@@ -77,5 +104,3 @@ process crash report が 1 回表示された。link manager と application は
 - transport sequence だけを初期化しても、古い distribution tick frame が outgoing queue に残った。
   その状態では reconnect できず、長時間後に queue が増えて Client が out-of-memory になった。
 - peer session 変更時に stale queue を破棄し、古い infinite reader を終了することで reconnect できた。
-
-Server-only reboot は別途確認する。

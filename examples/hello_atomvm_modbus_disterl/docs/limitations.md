@@ -7,8 +7,8 @@
 - Node B は自発的に bus を駆動できず、Node A の poll latency に制約されます。
 - 16-bit sequence の wraparound は未実装です。
 - session ID は起動時に生成する 32-bit random value であり、永続的な node identity や collision 検出はありません。
-- session 変更時の transport resynchronization と client-only reboot 後の `serial_dist` 再接続は
-  host test と実機で確認済みです。server-only reboot の実機試験は未実施です。
+- session 変更時の transport resynchronization と、client-only / server-only reboot 後の
+  `serial_dist` 再接続は host test と実機で確認済みです。
 - AtomVM `net_kernel` の distribution setup timeout は 7 秒固定です。9,600 baud の検証構成では成功しましたが、
   poll interval、baud、bus error に対する余裕は小さいです。
 - `serial_dist` の最大 frame は Modbus chunk より大きいため adapter が 232-byte chunk に分割しますが、
