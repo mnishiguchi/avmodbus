@@ -40,6 +40,8 @@
 - [x] initial handshakeのliveness failureをAtomVM sourceと実機で調査し、example-local setup retryを棄却する
 - [x] Phase 2 Clientのdefault startupを3秒遅らせ、約1.5秒Client先行の2 runで起動順序mitigationを実機確認する
 - [ ] AtomVM側でhalf-open connection cleanupとconnection retryを修正し、startup delayなしで再検証する
+  （setup PIDをpending entryへ保存する最小修正候補と検証手順は
+  [initial-handshake livenessの作業記録](worklog/2026-10-16-initial-handshake-liveness.md#upstream-follow-up)に記録済み）
 - [x] ACK-loss 下の queue / free heap と 8 KiB queue-full を実機測定する
 - [x] queue-full時にsessionをrolloverし、peer controller終了後のhandshakeとping/pong復旧を実機確認する
 - [x] queue-full後のsession rollover、peer boundary伝播、新streamの双方向配送を一連のhost testで固定する

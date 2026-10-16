@@ -62,3 +62,24 @@ recoveryを保証しない。
 
 根本対応にはAtomVM側で、setup processがpeerへ関連付く前に終了した場合のpending entry cleanupと、両endpointの
 link managerを含むretry lifecycleを検証する必要がある。exampleはその修正をvendorせず、`:serial_dist`を直接再利用する。
+
+## Upstream follow-up
+
+2026-10-16にAtomVM upstreamを再確認した。`release-0.7`の
+[`18b35870`](https://github.com/atomvm/AtomVM/commit/18b35870a0be75c42892db9a0762e8c7a7d61323)と`main`の
+[`3a9ea46b`](https://github.com/atomvm/AtomVM/commit/3a9ea46b8cf28066caf126c46119dc58f950de5f)では、どちらも
+`net_kernel`の最初のoutgoing connectが`ProtoDist:setup/5`の返すPIDを使用せず、connection mapへ
+`{pending, undefined, DHandle}`を保存する。
+
+一方、`ProtoDist:setup/5`はlinkされたsetup processのPIDを返す。返されたPIDをpending entryへ保存すれば、processが
+`mark_pending/4`より前に終了しても既存の`'EXIT'` handlerがentryを除去できる。これはlocal pending cleanupの最小修正候補で
+ある。ただし、実機で観測したpeer側のhalf-open controllerも同じretry中に解放されるかは、この変更だけからは確定できない。
+
+次のupstream検証は次の順で行う。
+
+1. setup processが`mark_pending/4`より前に終了する条件をAtomVM testで作り、次のconnectが新しいsetupを開始することを確認する
+2. 修正版system libraryで両boardをbuildし、Clientの`MODBUS_START_DELAY_MS=0`かつClientを3秒以上先行させる
+3. peer側controllerの終了、新しいhandshake、ping/pongまでを複数runで確認する
+4. upstream修正が利用可能になるまで、exampleの3秒startup delayを維持する
+
+この修正候補はAVModbusやFC-100 transportの責務ではないため、exampleへ`net_kernel`を複製しない。
