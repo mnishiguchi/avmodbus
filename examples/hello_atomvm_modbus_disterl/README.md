@@ -25,6 +25,11 @@ baud / poll matrix では 9,600–115,200 baud と 20 ms poll の zero-byte ping
 [baud-rate / poll-interval matrix](docs/worklog/2026-10-16-baud-poll-matrix.md) にあります。大きな payload を含む検証範囲が
 最も広い 9,600 baud / 20 ms を引き続き default とします。
 
+115,200 baud / 20 ms の follow-up では、512-byte payload を 30 往復、99.877 秒にわたって timeout なしで配送し、
+4 KiB payload の 1 往復も 22.617 秒で完了しました。詳細は
+[high-baud payload verification](docs/worklog/2026-10-16-high-baud-payloads.md) を参照してください。4 KiB は single run
+であり、default は変更しません。
+
 アーキテクチャ、制限、設計判断の一覧は [docs/README.md](docs/README.md)、詳細な実機ログと観察結果は
 [2026-10-15-hardware-verification.md](docs/worklog/2026-10-15-hardware-verification.md) にあります。
 
@@ -193,7 +198,7 @@ transport は UART / RTU receive buffer に残った以前の boot session の p
 | `ATOMVM_PEER_ALIAS` | role から `b` / `a` | peer node alias |
 | `ATOMVM_COOKIE` | `AtomVM` | distribution cookie |
 | `DISTERL_PING_COUNT` | `3` | remote ping 回数 |
-| `DISTERL_PING_DELAY_MS` | `2000` | boot 後の最初の ping delay |
+| `DISTERL_PING_DELAY_MS` | `2000` | 最初の ping と、成功または timeout 後の次の ping までの delay |
 | `DISTERL_PONG_TIMEOUT_MS` | `15000` | pong timeout |
 | `DISTERL_PAYLOAD_BYTES` | `0` | ping/pong で検証する deterministic payload size |
 

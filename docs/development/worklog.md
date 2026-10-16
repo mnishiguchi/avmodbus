@@ -81,7 +81,8 @@ custom Function Code `100` の request / response に polling、sequence / ACK�
 重ね、その上の virtual UART adapter を AtomVM の `serial_dist` へ接続しました。genuine
 distribution handshake と remote process messaging に加え、512-byte payload の 30 往復を
 223.327 秒、error と pong timeout なしで完了しました。片側または両側の再起動後の再同期も
-確認しています。
+確認しています。115,200 baud の follow-up では 512-byte payload の 30 往復を 99.877 秒で完了し、
+4 KiB payload の 1 往復も 22.617 秒で完了しました。
 
 **判断:** AVModbus の custom function support は application-specific carrier の実装に利用できます。
 ただし、今回の polling protocol、stream adaptation、recovery logic は Modbus library の一般機能では

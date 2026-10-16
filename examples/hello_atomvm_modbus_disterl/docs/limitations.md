@@ -15,12 +15,13 @@
 - wire protocol は 232-byte payload を許容しますが、今回の XIAO / HW-519 構成では上限付近の RTU frame が
   安定しませんでした。virtual UART は 96-byte operating chunk（RTU frame 114 bytes）を default とし、
   512-byte genuine distribution payload の双方向 round trip を実機確認済みです。
-- 4 KiB payload の 9,600-baud 実機試験は旧 232-byte chunk 構成で `net_tick_timeout` になりました。96-byte chunk
-  では未再試験です。115,200 baud / 20 ms poll の zero-byte ping/pong は session synchronization 修正後に成功しましたが、
-  512-byte payload と長時間接続は未検証です。
+- 4 KiB payload の 9,600-baud 実機試験は旧 232-byte chunk 構成で `net_tick_timeout` になりました。現行の
+  96-byte chunk / 115,200 baud / 20 ms poll では 1 往復を 22.617 秒で完了し、その後 30 秒の idle 中も
+  connection を維持しました。ただし single run であり、9,600 baud では現行 chunk を再試験していません。
 - zero-byte の established ping/pong RTT は matrix の single run で default の 9,600 baud / 20 ms が 1.326 秒、
-  115,200 baud / 20 ms が 0.890 秒でした。512-byte payload の 30-message soak test では RTT の min / average / max が
-  5.250 / 5.425 / 7.477 秒で、direct UART より大幅に遅くなります。
+  115,200 baud / 20 ms が 0.890 秒でした。512-byte payload の 30-message soak test の RTT min / average / max は、
+  9,600 baud で 5.250 / 5.425 / 7.477 秒、115,200 baud で 3.245 / 3.311 / 4.923 秒でした。後者も
+  direct UART より大幅に遅くなります。
 - Elixir `GenServer` が生成する未実装 callback の fallback は AtomVM 0.7.0-beta.0 にない
   `erlang:phash2/2` を呼びます。このサンプルは該当する `handle_call/3` と `handle_cast/2` を明示して
   `bad_call` または `bad_cast` の stop tuple を返すため、PackBEAM warning と unsupported failure path を除去しています。
