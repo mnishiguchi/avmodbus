@@ -198,6 +198,8 @@ transport は UART / RTU receive buffer に残った以前の boot session の p
 | `MODBUS_RESPONSE_TIMEOUT_MS` | `1000` / `500` | Phase 1 / Phase 2 transaction timeout |
 | `MODBUS_BULK_RESPONSE_TIMEOUT_MS` | `2000` | multi-chunk write 後の transaction timeout |
 | `MODBUS_CHUNK_PAYLOAD_BYTES` | `96` | virtual UART の operating chunk size（protocol 上限は 232） |
+| `MODBUS_MAX_QUEUED_BYTES` | `16384` | in-flight と pending を合わせた outgoing payload byte 上限 |
+| `MODBUS_MAX_QUEUED_CHUNKS` | `256` | in-flight と pending を合わせた outgoing chunk 数上限 |
 | `MODBUS_POLL_INTERVAL_MS` | `1000` / `20` | Phase 1 / Phase 2 polling interval |
 | `MODBUS_TRACE_TRANSACTIONS` | unset | `1` / `true` で non-idle transaction と全 failure の size、latency、累積成否を記録 |
 | `MODBUS_START_DELAY_MS` | `0` | recovery test 用の起動 delay |
@@ -217,6 +219,11 @@ transport は UART / RTU receive buffer に残った以前の boot session の p
 `DISTERL_PONG_TIMEOUT_MS` も十分に延ばしてください。232 bytes は wire protocol の上限ですが、今回の XIAO / HW-519
 構成では上限付近の RTU frame が安定しないため default にはしません。実測結果は
 [bidirectional multi-chunk round trip](docs/worklog/2026-10-16-bidirectional-multichunk.md) を参照してください。
+
+outgoing queue は byte 数と chunk 数の両方で制限します。1 回の write 全体が収まらない場合は partial data を
+queue に残さず `{:error, :queue_full}` を返し、`serial_dist` connection を fail fast させます。既定の 16 KiB は
+payload の合計だけを数えるため、ESP32-C5 の厳密な heap 使用量上限ではありません。設計理由は
+[ADR 0008](docs/adr/0008-bound-the-virtual-uart-queue.md) を参照してください。
 
 ## References
 

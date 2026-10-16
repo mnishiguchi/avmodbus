@@ -11,6 +11,8 @@ mode = if System.get_env("MODBUS_EXPERIMENT") == "disterl", do: :disterl, else: 
 role = if System.get_env("MODBUS_ROLE") == "server", do: :server, else: :client
 ping_payload_bytes = parse_integer.("DISTERL_PAYLOAD_BYTES", 0)
 chunk_payload_bytes = parse_integer.("MODBUS_CHUNK_PAYLOAD_BYTES", 96)
+max_queued_bytes = parse_integer.("MODBUS_MAX_QUEUED_BYTES", 16_384)
+max_queued_chunks = parse_integer.("MODBUS_MAX_QUEUED_CHUNKS", 256)
 
 if ping_payload_bytes < 0 do
   raise ArgumentError, "DISTERL_PAYLOAD_BYTES must be a non-negative integer"
@@ -18,6 +20,14 @@ end
 
 if chunk_payload_bytes < 1 or chunk_payload_bytes > 232 do
   raise ArgumentError, "MODBUS_CHUNK_PAYLOAD_BYTES must be between 1 and 232"
+end
+
+if max_queued_bytes < 1 do
+  raise ArgumentError, "MODBUS_MAX_QUEUED_BYTES must be a positive integer"
+end
+
+if max_queued_chunks < 1 or max_queued_chunks > 65_535 do
+  raise ArgumentError, "MODBUS_MAX_QUEUED_CHUNKS must be between 1 and 65535"
 end
 
 serial = [
@@ -54,6 +64,8 @@ config :disterl_probe,
     parse_integer.("MODBUS_RESPONSE_TIMEOUT_MS", if(mode == :disterl, do: 500, else: 1_000)),
   bulk_timeout_ms: parse_integer.("MODBUS_BULK_RESPONSE_TIMEOUT_MS", 2_000),
   chunk_payload_bytes: chunk_payload_bytes,
+  max_queued_bytes: max_queued_bytes,
+  max_queued_chunks: max_queued_chunks,
   poll_ms: parse_integer.("MODBUS_POLL_INTERVAL_MS", if(mode == :disterl, do: 20, else: 1_000)),
   trace_transactions: System.get_env("MODBUS_TRACE_TRANSACTIONS") in ["1", "true"],
   node_alias: System.get_env("ATOMVM_NODE_ALIAS") || if(role == :server, do: "b", else: "a"),

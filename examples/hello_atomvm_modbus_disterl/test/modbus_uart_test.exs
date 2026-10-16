@@ -8,7 +8,13 @@ defmodule DisterlProbe.ModbusUARTTest do
     payload = :binary.copy(pattern, 256)
     expected_chunks = div(byte_size(payload) + Protocol.max_payload() - 1, Protocol.max_payload())
 
-    {:ok, sender} = ModbusUART.queue_chunks(Channel.new(100), payload)
+    channel =
+      Channel.new(100,
+        max_queued_bytes: byte_size(payload),
+        max_queued_chunks: expected_chunks
+      )
+
+    {:ok, sender} = ModbusUART.queue_chunks(channel, payload)
 
     {sender, receiver, reassembled, chunks, retries} =
       transfer(sender, Channel.new(200), <<>>, 0, 0)
@@ -32,11 +38,20 @@ defmodule DisterlProbe.ModbusUARTTest do
     assert {1, first} = channel.outgoing
     assert byte_size(first) == 96
 
-    assert Enum.map(channel.pending, fn {_sequence, chunk} -> byte_size(chunk) end) == [
+    assert Enum.map(Channel.pending_payloads(channel), &byte_size/1) == [
              96,
              96,
              12
            ]
+  end
+
+  test "rejects a multi-chunk write atomically when it exceeds the byte bound" do
+    channel = Channel.new(400, max_queued_bytes: 191, max_queued_chunks: 10)
+    payload = :binary.copy(<<0x5A>>, 192)
+
+    assert ModbusUART.queue_chunks(channel, payload, 96) == {:error, :queue_full}
+    assert Channel.done?(channel)
+    assert channel.queued_bytes == 0
   end
 
   defp transfer(sender, receiver, reassembled, chunks, retries) do

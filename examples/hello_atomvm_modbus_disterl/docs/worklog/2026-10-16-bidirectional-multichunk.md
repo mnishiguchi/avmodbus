@@ -12,8 +12,8 @@
 - 232-byte chunk、1,000 ms bulk timeout: 245-byte FC-100 request が timeout し、retry 側で 712–760 ms 後に
   遅延 response を受けた。最終 chunk は連続 timeout になった
 - 232-byte chunk、2,000 ms bulk timeout: deadline だけを延ばしても上限付近の frame は安定しなかった
-- 128-byte chunk（RTU frame 146 bytes）: 最初の application chunk が Server に届かず連続 timeout になった
-- 96-byte chunk（RTU frame 114 bytes）: 全 request / response が完了した
+- 128-byte chunk（RTU frame 145 bytes）: 最初の application chunk が Server に届かず連続 timeout になった
+- 96-byte chunk（RTU frame 113 bytes）: 全 request / response が完了した
 
 128-byte payload でなく 128-byte RTU frame 付近が実用上の境界になっていると推定したため、protocol 上限 232 bytes は
 維持しつつ default operating chunk を 96 bytes にした。また、500 ms の handshake timeout は維持し、multi-chunk
@@ -55,3 +55,8 @@ Client は 230 successful transactions、boot 直後の timeout 1 回を記録�
 
 4 KiB payload は 96-byte chunk で未再試験である。232-byte wire capacity の安定化、baud / poll matrix、より長い soak
 test も別の roadmap 項目として残す。
+
+その後、96-byte chunk では 9,600 / 115,200 baud の両方で 4 KiB round trip を確認し、9,600 baud では3回の
+連続往復と active-transfer reboot recovery も確認した。結果は
+[4 KiB traffic の検証](2026-10-16-high-baud-payloads.md) と
+[転送中の reboot recovery](2026-10-16-active-transfer-recovery.md) に記録している。

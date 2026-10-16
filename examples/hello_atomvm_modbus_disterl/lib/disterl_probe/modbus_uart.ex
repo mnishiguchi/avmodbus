@@ -73,7 +73,11 @@ defmodule DisterlProbe.ModbusUART do
 
     state = %{
       role: role,
-      channel: Channel.new(),
+      channel:
+        Channel.new(
+          max_queued_bytes: Keyword.fetch!(options, :max_queued_bytes),
+          max_queued_chunks: Keyword.fetch!(options, :max_queued_chunks)
+        ),
       rx_buffer: <<>>,
       reader: nil,
       resource: nil,
@@ -117,6 +121,10 @@ defmodule DisterlProbe.ModbusUART do
         {:reply, :ok, %{state | channel: channel, response_timeout: response_timeout}}
 
       {:error, _reason} = error ->
+        IO.puts(
+          "modbus_uart: queue rejected bytes=#{byte_size(data)} reason=#{inspect(elem(error, 1))}"
+        )
+
         {:reply, error, state}
     end
   end

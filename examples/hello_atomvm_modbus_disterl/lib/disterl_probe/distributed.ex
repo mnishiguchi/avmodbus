@@ -11,6 +11,8 @@ defmodule DisterlProbe.Distributed do
   @timeout_ms Application.compile_env(:disterl_probe, :timeout_ms, 500)
   @bulk_timeout_ms Application.compile_env(:disterl_probe, :bulk_timeout_ms, 2_000)
   @chunk_payload_bytes Application.compile_env(:disterl_probe, :chunk_payload_bytes, 96)
+  @max_queued_bytes Application.compile_env(:disterl_probe, :max_queued_bytes, 16_384)
+  @max_queued_chunks Application.compile_env(:disterl_probe, :max_queued_chunks, 256)
   @poll_ms Application.compile_env(:disterl_probe, :poll_ms, 20)
   @trace_transactions Application.compile_env(:disterl_probe, :trace_transactions, false)
   @node_alias Application.compile_env(:disterl_probe, :node_alias, "a")
@@ -54,6 +56,8 @@ defmodule DisterlProbe.Distributed do
           timeout_ms: @timeout_ms,
           bulk_timeout_ms: @bulk_timeout_ms,
           chunk_payload_bytes: @chunk_payload_bytes,
+          max_queued_bytes: @max_queued_bytes,
+          max_queued_chunks: @max_queued_chunks,
           poll_ms: @poll_ms,
           trace_transactions: @trace_transactions
         ],

@@ -5,6 +5,9 @@
 
 - 2 node、single Unit ID、single Modbus client のみを対象とします。
 - Node B は自発的に bus を駆動できず、Node A の poll latency に制約されます。
+- virtual UART の outgoing queue は default 16 KiB / 256 chunks で、新しい write が上限を超えると
+  `{:error, :queue_full}` を返し、`serial_dist` connection は fail fast します。byte limit は payload の合計であり、
+  Elixir term や binary の runtime overhead を含む厳密な heap 上限ではありません。
 - 16-bit sequence の wraparound は host test 済みですが、65,535 message をまたぐ長時間の実機試験は未実施です。
 - session ID は起動時に生成する 32-bit random value であり、永続的な node identity や collision 検出はありません。
 - session 変更時の transport resynchronization と、client-only / server-only reboot 後の
@@ -17,7 +20,7 @@
   1,000 ms poll interval では setup timeout になりました。500 ms は 1 回成功したものの安全域とはみなさず、20 ms を
   default とします。
 - wire protocol は 232-byte payload を許容しますが、今回の XIAO / HW-519 構成では上限付近の RTU frame が
-  安定しませんでした。virtual UART は 96-byte operating chunk（RTU frame 114 bytes）を default とし、
+  安定しませんでした。virtual UART は 96-byte operating chunk（RTU frame 113 bytes）を default とし、
   512-byte genuine distribution payload の双方向 round trip を実機確認済みです。
 - 4 KiB payload の 9,600-baud 実機試験は旧 232-byte chunk 構成で `net_tick_timeout` になりました。現行の
   96-byte chunk / 20 ms poll では、9,600 baud で3回の往復を連続実行し、RTT min / average / max

@@ -22,3 +22,4 @@
 - [0005: GenServer の unsupported fallback callback を置き換える](0005-replace-unsupported-gen-server-fallbacks.md)
 - [0006: protocol 上限と operating chunk size を分離する](0006-separate-protocol-and-operating-chunk-size.md)
 - [0007: peer session の観測を stream synchronization boundary とする](0007-treat-peer-session-as-a-stream-boundary.md)
+- [0008: virtual UART の outgoing queue を制限する](0008-bound-the-virtual-uart-queue.md)
