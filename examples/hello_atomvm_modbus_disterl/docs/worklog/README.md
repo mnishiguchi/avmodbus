@@ -6,6 +6,7 @@
 
 ## 記録
 
+- [2026-10-16: application-traffic soak test](2026-10-16-application-traffic-soak.md)
 - [2026-10-16: bidirectional multi-chunk round trip](2026-10-16-bidirectional-multichunk.md)
 - [2026-10-16: RTU fault injection](2026-10-16-rtu-fault-injection.md)
 - [2026-10-16: PackBEAM `phash2/2` warning の除去](2026-10-16-packbeam-phash2.md)

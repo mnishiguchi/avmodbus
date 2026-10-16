@@ -9,6 +9,9 @@
 - session ID は起動時に生成する 32-bit random value であり、永続的な node identity や collision 検出はありません。
 - session 変更時の transport resynchronization と、client-only / server-only reboot 後の
   `serial_dist` 再接続は host test と実機で確認済みです。
+- 両 node の同時 reset では、Client が `invalid_acknowledgment` を繰り返して handshake が収束しない場合があります。
+  Server を動作させたまま Client だけを reset すると session-aware resynchronization で復旧します。startup race の
+  条件特定と自動収束は未完了です。
 - AtomVM `net_kernel` の distribution setup timeout は 7 秒固定です。9,600 baud の検証構成では成功しましたが、
   poll interval、baud、bus error に対する余裕は小さいです。
 - wire protocol は 232-byte payload を許容しますが、今回の XIAO / HW-519 構成では上限付近の RTU frame が
@@ -17,8 +20,8 @@
 - 4 KiB payload の 9,600-baud 実機試験は旧 232-byte chunk 構成で `net_tick_timeout` になりました。96-byte chunk
   では未再試験です。115,200 baud では今回の HW-519 構成で distribution handshake が安定せず、baud rate の
   変更だけでは解決しませんでした。
-- zero-byte の steady-state ping/pong RTT は約 0.8 秒、512-byte payload は 7.889 秒で、direct UART より
-  大幅に遅くなります。
+- zero-byte の steady-state ping/pong RTT は約 0.8 秒です。512-byte payload の 30-message soak test では
+  RTT の min / average / max が 5.250 / 5.425 / 7.477 秒で、direct UART より大幅に遅くなります。
 - Elixir `GenServer` が生成する未実装 callback の fallback は AtomVM 0.7.0-beta.0 にない
   `erlang:phash2/2` を呼びます。このサンプルは該当する `handle_call/3` と `handle_cast/2` を明示して
   `bad_call` または `bad_cast` の stop tuple を返すため、PackBEAM warning と unsupported failure path を除去しています。

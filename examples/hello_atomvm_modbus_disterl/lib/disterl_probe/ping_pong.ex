@@ -3,7 +3,7 @@ defmodule DisterlProbe.PingPong do
 
   use GenServer
 
-  alias DisterlProbe.Payload
+  alias DisterlProbe.{Payload, PingStats}
 
   @name :modbus_disterl_demo
   @ping_count Application.compile_env(:disterl_probe, :ping_count, 3)
@@ -30,6 +30,7 @@ defmodule DisterlProbe.PingPong do
        payload: payload,
        pending: nil,
        next_id: 1,
+       ping_stats: PingStats.new(),
        remaining: @ping_count
      }}
   end
@@ -88,7 +89,7 @@ defmodule DisterlProbe.PingPong do
   def handle_info({:pong_timeout, id}, %{pending: {id, _sent_at}} = state) do
     IO.puts("modbus_disterl: pong #{id} timed out; retrying")
     Process.send_after(self(), :send_ping, @ping_delay_ms)
-    {:noreply, %{state | pending: nil}}
+    {:noreply, %{state | pending: nil, ping_stats: PingStats.record_timeout(state.ping_stats)}}
   end
 
   def handle_info({:pong_timeout, _id}, state), do: {:noreply, state}
@@ -98,6 +99,7 @@ defmodule DisterlProbe.PingPong do
     now = :erlang.monotonic_time(:millisecond)
     rtt_ms = now - sent_at
     connection_ms = now - state.started_at
+    ping_stats = PingStats.record_success(state.ping_stats, rtt_ms)
 
     IO.puts(
       "modbus_disterl: received pong #{id} from #{inspect(from_node)} rtt_ms=#{rtt_ms} payload_bytes=#{payload_bytes}"
@@ -111,11 +113,19 @@ defmodule DisterlProbe.PingPong do
       state
       | pending: nil,
         next_id: id + 1,
+        ping_stats: ping_stats,
         remaining: state.remaining - 1
     }
 
     if next.remaining == 0 do
-      IO.puts("modbus_disterl: complete #{@ping_count} remote ping/pong messages")
+      summary = PingStats.summary(ping_stats)
+
+      IO.puts(
+        "modbus_disterl: complete #{summary.successes} remote ping/pong messages " <>
+          "rtt_min_ms=#{summary.min_rtt_ms} rtt_avg_ms=#{summary.average_rtt_ms} " <>
+          "rtt_max_ms=#{summary.max_rtt_ms} timeouts=#{summary.timeouts} " <>
+          "elapsed_ms=#{connection_ms}"
+      )
     else
       Process.send_after(self(), :send_ping, @ping_delay_ms)
     end

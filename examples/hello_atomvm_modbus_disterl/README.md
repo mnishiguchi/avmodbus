@@ -16,6 +16,10 @@ Function Code `100` (`0x64`) だけを利用します。
 genuine distribution ping/pong を双方向に完了しました（RTT: 7889 ms）。詳細は
 [bidirectional multi-chunk round trip](docs/worklog/2026-10-16-bidirectional-multichunk.md) を参照してください。
 
+同じ構成の 30-message soak test では、512-byte payload を 30 往復、223.327 秒にわたって error なしで配送しました。
+RTT の min / average / max は 5250 / 5425 / 7477 ms、pong timeout は 0 回でした。詳細は
+[application-traffic soak test](docs/worklog/2026-10-16-application-traffic-soak.md) を参照してください。
+
 アーキテクチャ、制限、設計判断の一覧は [docs/README.md](docs/README.md)、詳細な実機ログと観察結果は
 [2026-10-15-hardware-verification.md](docs/worklog/2026-10-15-hardware-verification.md) にあります。
 
@@ -143,12 +147,25 @@ modbus_disterl: sending ping 1 to :b@modbus.local payload_bytes=0
 modbus_disterl: received pong 1 from :b@modbus.local rtt_ms=... payload_bytes=0
 modbus_disterl: received pong 2 from :b@modbus.local rtt_ms=... payload_bytes=0
 modbus_disterl: received pong 3 from :b@modbus.local rtt_ms=... payload_bytes=0
-modbus_disterl: complete 3 remote ping/pong messages
+modbus_disterl: complete 3 remote ping/pong messages rtt_min_ms=... rtt_avg_ms=... rtt_max_ms=... timeouts=0 elapsed_ms=...
 ```
 
 Server には `received ping N from :a@modbus.local` が表示されます。この remote
 message は registered process `:modbus_disterl_demo` 宛に Erlang distribution を
 通して送信されます。
+
+長時間の application-traffic test では `DISTERL_PING_COUNT` と payload size を増やします。例えば実機で確認した
+30-message / 512-byte 構成は次のとおりです。Server と Client の両方を同じ値で clean、pack、flash してください。
+
+```sh
+DISTERL_PAYLOAD_BYTES=512 DISTERL_PING_COUNT=30 \
+  DISTERL_PONG_TIMEOUT_MS=60000 MODBUS_EXPERIMENT=disterl \
+  MIX_ENV=prod mix atomvm.packbeam
+```
+
+完了行には RTT の min / average / max、retry に至った pong timeout 数、起動からの経過時間が表示されます。
+両 node の同時 reset では startup sequence が収束しない場合があるため、`invalid_acknowledgment` が続く場合は
+Server を動かしたまま Client だけを reset してください。
 
 ## Build-time configuration
 
