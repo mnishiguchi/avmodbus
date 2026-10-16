@@ -22,7 +22,8 @@
 - [x] Client だけを reboot しても自動的に再接続できることを host test と実機で確認する
 - [x] Server だけを reboot しても自動的に再接続できることを実機で確認する
 - [x] 16-bit sequence number の wraparound を実装し、host test で検証する
-- [ ] 大きな distribution payload の chunk 分割、再構成、再送を stress test する
+- [x] 64 KiB byte stream の chunk 分割、再構成、再送を host stress test する
+- [ ] 大きな genuine distribution payload を実機で送受信する
 - [ ] response 消失、CRC error、連続 timeout を実機または fault injection で検証する
 - [ ] baud rate と poll interval ごとの handshake 時間、RTT、timeout の安全域を測定する
 - [ ] 長時間接続で tick frame と application traffic が安定して共存することを確認する

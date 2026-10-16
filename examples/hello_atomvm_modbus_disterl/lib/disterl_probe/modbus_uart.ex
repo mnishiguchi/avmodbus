@@ -38,6 +38,20 @@ defmodule DisterlProbe.ModbusUART do
              (timeout == :infinity or (is_integer(timeout) and timeout >= 0)),
       do: GenServer.call(pid, {:read, timeout}, :infinity)
 
+  @doc false
+  def queue_chunks(channel, <<>>), do: {:ok, channel}
+
+  def queue_chunks(channel, data) when byte_size(data) <= @max_payload,
+    do: Channel.queue(channel, data)
+
+  def queue_chunks(channel, data) do
+    <<chunk::binary-size(@max_payload), rest::binary>> = data
+
+    with {:ok, next} <- Channel.queue(channel, chunk) do
+      queue_chunks(next, rest)
+    end
+  end
+
   # AVModbus module-handler entry point for the server role.
   def handle_request(_unit, {:custom, @function_code, payload}, adapter) do
     GenServer.call(adapter, {:exchange, payload}, :infinity)
@@ -236,20 +250,6 @@ defmodule DisterlProbe.ModbusUART do
     if timer != nil, do: Process.cancel_timer(timer)
     GenServer.reply(from, {:error, :closed})
     %{state | reader: nil}
-  end
-
-  defp queue_chunks(channel, <<>>), do: {:ok, channel}
-
-  defp queue_chunks(channel, data) when byte_size(data) <= @max_payload,
-    do: Channel.queue(channel, data)
-
-  defp queue_chunks(channel, data) do
-    size = @max_payload
-    <<chunk::binary-size(size), rest::binary>> = data
-
-    with {:ok, next} <- Channel.queue(channel, chunk) do
-      queue_chunks(next, rest)
-    end
   end
 
   defp schedule_poll(delay), do: Process.send_after(self(), :poll, delay)

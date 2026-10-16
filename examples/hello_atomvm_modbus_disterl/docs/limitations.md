@@ -12,7 +12,8 @@
 - AtomVM `net_kernel` の distribution setup timeout は 7 秒固定です。9,600 baud の検証構成では成功しましたが、
   poll interval、baud、bus error に対する余裕は小さいです。
 - `serial_dist` の最大 frame は Modbus chunk より大きいため adapter が 232-byte chunk に分割しますが、
-  大きな distribution payload の stress test は未実施です。
+  検証済みなのは 64 KiB byte stream の host stress test までです。大きな genuine distribution payload の
+  実機試験は未実施です。
 - 実測した steady-state ping/pong RTT は約 0.8 秒で、direct UART より大幅に遅くなります。
 - PackBEAM checker は Elixir `GenServer` が生成する error-reporting path に含まれる
   `erlang:phash2/2` を警告します。検証した normal path は両方の実機で動作しました。

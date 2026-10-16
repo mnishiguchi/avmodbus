@@ -6,6 +6,7 @@
 
 ## 記録
 
+- [2026-10-16: 64 KiB byte-stream stress test](2026-10-16-byte-stream-stress.md)
 - [2026-10-16: sequence wraparound](2026-10-16-sequence-wraparound.md)
 - [2026-10-16: session-aware reboot recovery](2026-10-16-session-recovery.md)
 - [2026-10-15: XIAO ESP32-C5 2 台での実機検証](2026-10-15-hardware-verification.md)
