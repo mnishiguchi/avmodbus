@@ -10,16 +10,17 @@
 - session 変更時の transport resynchronization と、client-only / server-only reboot 後の
   `serial_dist` 再接続は host test と実機で確認済みです。
 - AtomVM `net_kernel` の distribution setup timeout は 7 秒固定です。9,600 baud の検証構成では成功しましたが、
-  両 node の同時 reset 後の first reply は 2 回の実測で 6.291 秒と 6.513 秒であり、poll interval、baud、bus error に
-  対する余裕は小さいです。
+  1,000 ms poll interval では setup timeout になりました。500 ms は 1 回成功したものの安全域とはみなさず、20 ms を
+  default とします。
 - wire protocol は 232-byte payload を許容しますが、今回の XIAO / HW-519 構成では上限付近の RTU frame が
   安定しませんでした。virtual UART は 96-byte operating chunk（RTU frame 114 bytes）を default とし、
   512-byte genuine distribution payload の双方向 round trip を実機確認済みです。
 - 4 KiB payload の 9,600-baud 実機試験は旧 232-byte chunk 構成で `net_tick_timeout` になりました。96-byte chunk
-  では未再試験です。115,200 baud では今回の HW-519 構成で distribution handshake が安定せず、baud rate の
-  変更だけでは解決しませんでした。
-- zero-byte の steady-state ping/pong RTT は約 0.8 秒です。512-byte payload の 30-message soak test では
-  RTT の min / average / max が 5.250 / 5.425 / 7.477 秒で、direct UART より大幅に遅くなります。
+  では未再試験です。115,200 baud / 20 ms poll の zero-byte ping/pong は session synchronization 修正後に成功しましたが、
+  512-byte payload と長時間接続は未検証です。
+- zero-byte の established ping/pong RTT は matrix の single run で default の 9,600 baud / 20 ms が 1.326 秒、
+  115,200 baud / 20 ms が 0.890 秒でした。512-byte payload の 30-message soak test では RTT の min / average / max が
+  5.250 / 5.425 / 7.477 秒で、direct UART より大幅に遅くなります。
 - Elixir `GenServer` が生成する未実装 callback の fallback は AtomVM 0.7.0-beta.0 にない
   `erlang:phash2/2` を呼びます。このサンプルは該当する `handle_call/3` と `handle_cast/2` を明示して
   `bad_call` または `bad_cast` の stop tuple を返すため、PackBEAM warning と unsupported failure path を除去しています。

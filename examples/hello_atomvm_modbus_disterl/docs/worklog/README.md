@@ -6,6 +6,7 @@
 
 ## 記録
 
+- [2026-10-16: baud-rate / poll-interval matrix](2026-10-16-baud-poll-matrix.md)
 - [2026-10-16: simultaneous-startup recovery](2026-10-16-simultaneous-startup-recovery.md)
 - [2026-10-16: application-traffic soak test](2026-10-16-application-traffic-soak.md)
 - [2026-10-16: bidirectional multi-chunk round trip](2026-10-16-bidirectional-multichunk.md)

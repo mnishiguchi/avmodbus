@@ -20,6 +20,11 @@ genuine distribution ping/pong を双方向に完了しました（RTT: 7889 ms�
 RTT の min / average / max は 5250 / 5425 / 7477 ms、pong timeout は 0 回でした。詳細は
 [application-traffic soak test](docs/worklog/2026-10-16-application-traffic-soak.md) を参照してください。
 
+baud / poll matrix では 9,600–115,200 baud と 20 ms poll の zero-byte ping/pong が成功しました。9,600 baud では
+500 ms poll まで成功し、1,000 ms で distribution setup timeout になりました。再現条件と測定値は
+[baud-rate / poll-interval matrix](docs/worklog/2026-10-16-baud-poll-matrix.md) にあります。大きな payload を含む検証範囲が
+最も広い 9,600 baud / 20 ms を引き続き default とします。
+
 アーキテクチャ、制限、設計判断の一覧は [docs/README.md](docs/README.md)、詳細な実機ログと観察結果は
 [2026-10-15-hardware-verification.md](docs/worklog/2026-10-15-hardware-verification.md) にあります。
 
