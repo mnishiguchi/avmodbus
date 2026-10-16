@@ -146,8 +146,9 @@ modbus_disterl: complete 3 remote ping/pong messages rtt_min_ms=33817 rtt_avg_ms
 旧 232-byte chunk 構成で発生した `net_tick_timeout` は再現しなかった。この比較は operating chunk の縮小が
 安定化に寄与したことを示すが、各条件の run 数が少ないため failure 原因を chunk size だけに限定はできない。
 
-一方、4 KiB の consecutive run は 9,600 baud で1回、115,200 baud は single-message run だけであり、
-4 KiB traffic 中の reboot recovery も未検証である。default は実績範囲の広い 9,600 baud / 20 ms のままとし、
+一方、4 KiB の consecutive run は 9,600 baud で1回、115,200 baud は single-message run だけである。
+その後、9,600 baud では [4 KiB 転送中の Server reboot recovery](2026-10-16-active-transfer-recovery.md) も
+1 run 成功した。default は実績範囲の広い 9,600 baud / 20 ms のままとし、
 どちらの baud rate についても 4 KiB traffic を一般的な安定動作として保証しない。
 
 試験後、両 board は 9,600 baud / 20 ms poll / zero-byte payload の default distributed Erlang firmware へ戻した。

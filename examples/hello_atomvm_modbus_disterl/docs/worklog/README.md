@@ -6,6 +6,7 @@
 
 ## 記録
 
+- [2026-10-16: 4 KiB 転送中の Server reboot recovery](2026-10-16-active-transfer-recovery.md)
 - [2026-10-16: 115,200 baud での 512-byte soak と 4 KiB traffic](2026-10-16-high-baud-payloads.md)
 - [2026-10-16: baud-rate / poll-interval matrix](2026-10-16-baud-poll-matrix.md)
 - [2026-10-16: simultaneous-startup recovery](2026-10-16-simultaneous-startup-recovery.md)

@@ -8,7 +8,11 @@
 - 16-bit sequence の wraparound は host test 済みですが、65,535 message をまたぐ長時間の実機試験は未実施です。
 - session ID は起動時に生成する 32-bit random value であり、永続的な node identity や collision 検出はありません。
 - session 変更時の transport resynchronization と、client-only / server-only reboot 後の
-  `serial_dist` 再接続は host test と実機で確認済みです。
+  `serial_dist` 再接続は host test と実機で確認済みです。確立済み connection では、4 KiB stream の最初の
+  96-byte chunk 受信後に Server を reboot しても、1 回の pong timeout 後に message を再送して復旧しました。
+- 直前の traffic が UART / RTU buffer に残り、Client が Server より約 1〜2 秒先に起動した 2 run では、initial
+  handshake 中の peer session change 後に application ping retry だけでは新しい handshake が始まりませんでした。
+  Server-first startup では回避できましたが、session change 後の connection retry trigger は未解決です。
 - AtomVM `net_kernel` の distribution setup timeout は 7 秒固定です。9,600 baud の検証構成では成功しましたが、
   1,000 ms poll interval では setup timeout になりました。500 ms は 1 回成功したものの安全域とはみなさず、20 ms を
   default とします。
@@ -19,7 +23,7 @@
   96-byte chunk / 20 ms poll では、9,600 baud で3回の往復を連続実行し、RTT min / average / max
   33.817 / 34.743 / 36.594 秒、timeout 0 で完了しました。完了後 35 秒の idle 中も connection を維持しました。
   115,200 baud では 1 往復を 22.617 秒で完了し、その後 30 秒 connection を維持しました。ただし、9,600 baud の
-  連続試験も 1 run のみで、115,200 baud の連続 traffic と 4 KiB traffic 中の reboot recovery は未検証です。
+  連続試験と active-transfer reboot recovery は各 1 run のみで、115,200 baud の連続 traffic は未検証です。
 - zero-byte の established ping/pong RTT は matrix の single run で default の 9,600 baud / 20 ms が 1.326 秒、
   115,200 baud / 20 ms が 0.890 秒でした。512-byte payload の 30-message soak test の RTT min / average / max は、
   9,600 baud で 5.250 / 5.425 / 7.477 秒、115,200 baud で 3.245 / 3.311 / 4.923 秒でした。後者も

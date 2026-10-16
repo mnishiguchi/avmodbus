@@ -33,7 +33,7 @@ AVModbus の custom Function Code `100` を transport primitive として使い�
 ESP32-C5 で genuine distribution handshake、remote process の ping / pong、512-byte
 payload の連続往復、96-byte chunk と 9,600 baud での 4 KiB payload の3回連続往復、
 115,200 baud での 4 KiB payload の 1 往復、
-再起動後の再同期を確認しました。
+確立済み connection の 4 KiB 転送中に Server を再起動した後の再送・再同期を確認しました。
 
 これは [独立した実験用サンプル](examples/hello_atomvm_modbus_disterl/README.md) の成果です。
 AVModbus が distributed Erlang carrier を public API として提供している、または production

@@ -31,6 +31,12 @@ baud / poll matrix では 9,600–115,200 baud と 20 ms poll の zero-byte ping
 [payload traffic verification](docs/worklog/2026-10-16-high-baud-payloads.md) を参照してください。4 KiB の連続試験は
 9,600 baud の 1 run に限られるため、default は変更せず、一般的な安定動作としては保証しません。
 
+確立済み connection では、2回目の 4 KiB upload の最初の 96-byte chunk を Server が受信した直後に Server を
+reboot しても、Client が session 変更を検出し、1回の pong timeout 後に同じ message を再送して復旧しました。
+一方、initial handshake 中に stale session から現在の session へ切り替わった後、connection retry が進まない
+起動順序依存も見つかっています。条件とログは
+[active-transfer reboot recovery](docs/worklog/2026-10-16-active-transfer-recovery.md) に記録しています。
+
 アーキテクチャ、制限、設計判断の一覧は [docs/README.md](docs/README.md)、詳細な実機ログと観察結果は
 [2026-10-15-hardware-verification.md](docs/worklog/2026-10-15-hardware-verification.md) にあります。
 
