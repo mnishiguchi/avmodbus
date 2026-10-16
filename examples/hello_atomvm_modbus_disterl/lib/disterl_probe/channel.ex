@@ -4,10 +4,13 @@ defmodule DisterlProbe.Channel do
 
   Retransmits the head message in later polls, advances the queue only after
   an acknowledgment, and delivers a given sequence only once per peer
-  session. Sequence wraparound is deliberately left out of this experiment.
+  session. Non-zero 16-bit sequence numbers wrap from 65,535 back to 1.
   """
 
   alias DisterlProbe.{Protocol, Session}
+
+  @max_sequence 65_535
+  @stale_ack_window div(@max_sequence, 2)
 
   def new(session \\ Session.new_id())
       when is_integer(session) and session in 1..4_294_967_295 do
@@ -16,27 +19,38 @@ defmodule DisterlProbe.Channel do
       peer_session: nil,
       outgoing: nil,
       pending: [],
+      outstanding: 0,
       sent: 0,
       received: 0
     }
   end
 
-  def queue(%{sent: sent} = state, data)
-      when sent < 65_535 and is_binary(data) and byte_size(data) > 0 do
+  def queue(%{outstanding: outstanding} = state, data)
+      when outstanding < @max_sequence and is_binary(data) and byte_size(data) > 0 do
+    sequence = next_sequence(state.sent)
+
     with {:ok, _packet} <-
            Protocol.encode(
              state.session,
-             sent + 1,
+             sequence,
              state.peer_session || 0,
              state.received,
              data
            ) do
-      message = {sent + 1, data}
+      message = {sequence, data}
 
       next =
         case state.outgoing do
-          nil -> %{state | outgoing: message, sent: sent + 1}
-          _inflight -> %{state | pending: state.pending ++ [message], sent: sent + 1}
+          nil ->
+            %{state | outgoing: message, sent: sequence, outstanding: outstanding + 1}
+
+          _inflight ->
+            %{
+              state
+              | pending: state.pending ++ [message],
+                sent: sequence,
+                outstanding: outstanding + 1
+            }
         end
 
       {:ok, next}
@@ -72,17 +86,18 @@ defmodule DisterlProbe.Channel do
     with :ok <- check_ack(observed, incoming.acknowledged_session, incoming.acknowledgment),
          {:ok, next, delivered} <-
            accept(observed, incoming.sequence, incoming.payload, session_changed) do
-      {outgoing, pending} =
+      {outgoing, pending, outstanding} =
         case {incoming.acknowledged_session, next.outgoing} do
           {local_session, {acknowledgment, _payload}}
           when local_session == next.session and acknowledgment == incoming.acknowledgment ->
-            promote(next.pending)
+            {promoted, remaining} = promote(next.pending)
+            {promoted, remaining, next.outstanding - 1}
 
           {_acknowledged_session, inflight} ->
-            {inflight, next.pending}
+            {inflight, next.pending, next.outstanding}
         end
 
-      {:ok, %{next | outgoing: outgoing, pending: pending}, delivered}
+      {:ok, %{next | outgoing: outgoing, pending: pending, outstanding: outstanding}, delivered}
     end
   end
 
@@ -104,6 +119,7 @@ defmodule DisterlProbe.Channel do
       | peer_session: session,
         outgoing: nil,
         pending: [],
+        outstanding: 0,
         sent: 0,
         received: 0
     }
@@ -115,13 +131,17 @@ defmodule DisterlProbe.Channel do
 
   defp check_ack(_state, _acknowledged_session, 0), do: :ok
 
-  defp check_ack(%{outgoing: {sequence, _payload}}, _acknowledged_session, acknowledgment)
-       when acknowledgment <= sequence,
-       do: :ok
+  defp check_ack(%{outgoing: {sequence, _payload}}, _acknowledged_session, acknowledgment) do
+    if current_or_stale_ack?(acknowledgment, sequence),
+      do: :ok,
+      else: {:error, :invalid_acknowledgment}
+  end
 
-  defp check_ack(%{outgoing: nil, sent: sent}, _acknowledged_session, acknowledgment)
-       when acknowledgment <= sent,
-       do: :ok
+  defp check_ack(%{outgoing: nil, sent: sent}, _acknowledged_session, acknowledgment) do
+    if current_or_stale_ack?(acknowledgment, sent),
+      do: :ok,
+      else: {:error, :invalid_acknowledgment}
+  end
 
   defp check_ack(_state, _acknowledged_session, _acknowledgment),
     do: {:error, :invalid_acknowledgment}
@@ -139,9 +159,21 @@ defmodule DisterlProbe.Channel do
        do: {:ok, state, nil}
 
   defp accept(%{received: previous} = state, sequence, data, false)
-       when sequence == previous + 1 and byte_size(data) > 0 do
-    {:ok, %{state | received: sequence}, data}
+       when byte_size(data) > 0 do
+    if sequence == next_sequence(previous),
+      do: {:ok, %{state | received: sequence}, data},
+      else: {:error, :out_of_order}
   end
 
   defp accept(_state, _sequence, _data, _session_changed), do: {:error, :out_of_order}
+
+  defp next_sequence(@max_sequence), do: 1
+  defp next_sequence(sequence), do: sequence + 1
+
+  defp current_or_stale_ack?(_acknowledgment, 0), do: false
+
+  defp current_or_stale_ack?(acknowledgment, reference) do
+    backward_distance = rem(reference - acknowledgment + @max_sequence, @max_sequence)
+    backward_distance <= @stale_ack_window
+  end
 end

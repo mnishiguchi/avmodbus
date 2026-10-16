@@ -5,7 +5,7 @@
 
 - 2 node、single Unit ID、single Modbus client のみを対象とします。
 - Node B は自発的に bus を駆動できず、Node A の poll latency に制約されます。
-- 16-bit sequence の wraparound は未実装です。
+- 16-bit sequence の wraparound は host test 済みですが、65,535 message をまたぐ長時間の実機試験は未実施です。
 - session ID は起動時に生成する 32-bit random value であり、永続的な node identity や collision 検出はありません。
 - session 変更時の transport resynchronization と、client-only / server-only reboot 後の
   `serial_dist` 再接続は host test と実機で確認済みです。

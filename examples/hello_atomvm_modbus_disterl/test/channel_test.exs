@@ -153,6 +153,54 @@ defmodule DisterlProbe.ChannelTest do
     assert unchanged.outgoing == restarted.outgoing
   end
 
+  test "sequence numbers wrap from 65,535 to 1 without duplicate delivery" do
+    sender = %{Channel.new(80) | sent: 65_534}
+    receiver = %{Channel.new(81) | peer_session: 80, received: 65_534}
+
+    {:ok, sender} = Channel.queue(sender, "last")
+    {:ok, last_packet} = packet(sender)
+    assert last_packet.sequence == 65_535
+    assert {:ok, receiver, "last"} = Channel.receive_packet(receiver, last_packet)
+    assert {:ok, ^receiver, nil} = Channel.receive_packet(receiver, last_packet)
+
+    {:ok, last_ack} = packet(receiver)
+    {:ok, sender, nil} = Channel.receive_packet(sender, last_ack)
+
+    {:ok, sender} = Channel.queue(sender, "wrapped")
+    {:ok, wrapped_packet} = packet(sender)
+    assert wrapped_packet.sequence == 1
+    assert {:ok, receiver, "wrapped"} = Channel.receive_packet(receiver, wrapped_packet)
+    assert {:ok, ^receiver, nil} = Channel.receive_packet(receiver, wrapped_packet)
+
+    {:ok, wrapped_ack} = packet(receiver)
+    assert {:ok, sender, nil} = Channel.receive_packet(sender, wrapped_ack)
+    assert Channel.done?(sender)
+    assert receiver.received == 1
+  end
+
+  test "stale acknowledgments remain valid across sequence wraparound" do
+    {:ok, sender} = Channel.queue(%{Channel.new(90) | sent: 65_535}, "wrapped")
+
+    stale_ack = %{
+      session: 91,
+      sequence: 0,
+      acknowledged_session: 90,
+      acknowledgment: 65_535,
+      payload: <<>>
+    }
+
+    assert {:ok, unchanged, nil} = Channel.receive_packet(sender, stale_ack)
+    assert unchanged.outgoing == {1, "wrapped"}
+
+    future_ack = %{stale_ack | acknowledgment: 2}
+    assert Channel.receive_packet(sender, future_ack) == {:error, :invalid_acknowledgment}
+  end
+
+  test "does not reuse a sequence while the complete sequence space is outstanding" do
+    full = %{Channel.new() | outstanding: 65_535}
+    assert Channel.queue(full, "one too many") == {:error, :queue_unavailable}
+  end
+
   test "rejects malformed data and out-of-order sequences" do
     assert Protocol.decode(<<2, 0, 1, 0, 0, 1>>) == {:error, :invalid_packet}
     assert Protocol.encode(1, 0, 0, 0, "x") == {:error, :invalid_packet}

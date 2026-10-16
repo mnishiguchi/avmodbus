@@ -30,6 +30,9 @@ Node B sends queued data only in a response to a poll.
 - ACK されるまで同じ sequence と payload を再送する
 - 受信済み sequence の再送は配達せず、ACK だけを再送する
 - `sequence = 0` は送信 data なし、`acknowledgment = 0` は ACK なしを表す
+- data sequence は `1..65,535` を使い、65,535 の次は 1 へ wrap する
+- ACK の新旧は wraparound を考慮した serial-number arithmetic で判定する
+- 未 ACK message が sequence 空間全体を占有した場合は、新しい message の queue を拒否する
 - 各起動時に non-zero の 32-bit session ID を生成する
 - ACK は `acknowledged_session` と一致する local session にだけ適用する
 - 新しい peer session を受信した側は、その最初の sequence を新しい receive baseline として受け入れる

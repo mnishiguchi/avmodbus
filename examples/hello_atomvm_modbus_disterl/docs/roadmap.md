@@ -21,7 +21,7 @@
 - [x] boot/session ID と session-aware resynchronization を設計し、host test を追加する
 - [x] Client だけを reboot しても自動的に再接続できることを host test と実機で確認する
 - [x] Server だけを reboot しても自動的に再接続できることを実機で確認する
-- [ ] 16-bit sequence number の wraparound を実装して検証する
+- [x] 16-bit sequence number の wraparound を実装し、host test で検証する
 - [ ] 大きな distribution payload の chunk 分割、再構成、再送を stress test する
 - [ ] response 消失、CRC error、連続 timeout を実機または fault injection で検証する
 - [ ] baud rate と poll interval ごとの handshake 時間、RTT、timeout の安全域を測定する
