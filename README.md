@@ -40,7 +40,7 @@ virtual UART adapter はサンプル内にあり、`lib/avmodbus/` は変更し�
 
 - [実験の構成と再現手順](examples/hello_atomvm_modbus_disterl/README.md)
 - [実機試験と測定結果](examples/hello_atomvm_modbus_disterl/docs/worklog/README.md)
-- [既知の制約](https://github.com/mnishiguchi/avmodbus/blob/main/examples/hello_atomvm_modbus_disterl/docs/limitations.md)
+- [既知の制約](https://github.com/piyopiyoex/avmodbus/blob/main/examples/hello_atomvm_modbus_disterl/docs/limitations.md)
 
 ## Client の例
 
@@ -83,12 +83,12 @@ mix test
 
 設計や検証結果を調べる場合は、次の資料を参照してください。
 
-- [ドキュメント一覧と更新方針](https://github.com/mnishiguchi/avmodbus/blob/main/docs/README.md) — 資料の分類とメンテナンス方法
+- [ドキュメント一覧と更新方針](https://github.com/piyopiyoex/avmodbus/blob/main/docs/README.md) — 資料の分類とメンテナンス方法
 - [開発者ガイド](docs/development.md) — テストと高度な使い方
 - [アーキテクチャ](docs/architecture.md) — 内部構造と設計方針
-- [開発記録](https://github.com/mnishiguchi/avmodbus/blob/main/docs/development/worklog.md) /
-  [設計判断](https://github.com/mnishiguchi/avmodbus/blob/main/docs/adr/README.md) — 実験結果と判断理由
-- [リリース前チェックリスト](https://github.com/mnishiguchi/avmodbus/blob/main/docs/development/release-checklist.md)
+- [開発記録](https://github.com/piyopiyoex/avmodbus/blob/main/docs/development/worklog.md) /
+  [設計判断](https://github.com/piyopiyoex/avmodbus/blob/main/docs/adr/README.md) — 実験結果と判断理由
+- [リリース前チェックリスト](https://github.com/piyopiyoex/avmodbus/blob/main/docs/development/release-checklist.md)
 
 ## 動作環境と注意点
 
@@ -99,7 +99,7 @@ Modbus TCP の暗号化・相互認証には未対応です。暗号化なしに
 **TCP Server は信頼できるネットワーク内で使用してください**。
 また、ESP32-C5 の TCP 接続数には実機で確認した範囲があります。
 詳細は
-[既知の制約](https://github.com/mnishiguchi/avmodbus/blob/main/docs/limitations.md)
+[既知の制約](https://github.com/piyopiyoex/avmodbus/blob/main/docs/limitations.md)
 を参照してください。
 
 ## ライセンス

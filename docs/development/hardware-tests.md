@@ -81,7 +81,7 @@ MIX_ENV=prod mix atomvm.size
 ```
 
 baseline と budget の更新方針は
-[リソース計測](https://github.com/mnishiguchi/avmodbus/blob/main/docs/development/resource-measurements.md#ファームウェアサイズ)
+[リソース計測](https://github.com/piyopiyoex/avmodbus/blob/main/docs/development/resource-measurements.md#ファームウェアサイズ)
 を参照してください。
 
 ## 設定
@@ -161,7 +161,7 @@ mix atomvm.esp32.monitor --port /dev/ttyACM0
 
 この telemetry は観測機能であり、それ自体を external Modbus peer との interoperability 成功とは扱いません。
 実 RS485 traffic を使った計測条件と結果は
-[Memory 使用量の実 RS485 基準値](https://github.com/mnishiguchi/avmodbus/blob/main/docs/development/resource-measurements.md#2026-10-10-実-rs485-基準値)に
+[Memory 使用量の実 RS485 基準値](https://github.com/piyopiyoex/avmodbus/blob/main/docs/development/resource-measurements.md#2026-10-10-実-rs485-基準値)に
 記録しています。
 
 ## 実機の resource recovery probe

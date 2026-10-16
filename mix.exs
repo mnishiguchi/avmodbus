@@ -2,7 +2,7 @@ defmodule AVModbus.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/mnishiguchi/avmodbus"
+  @source_url "https://github.com/piyopiyoex/avmodbus"
 
   def project do
     [

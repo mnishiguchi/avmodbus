@@ -141,7 +141,7 @@ TCP では gateway を考慮して `0..255` を使用します。
 メモリ全体の上限ではありません。接続終了時には実行中の handler を停止します。
 handler に長い寿命が必要なら、別の Supervisor 管理プロセスへ委譲してください。
 TCP の受信・終了処理については
-[ADR 0007](https://github.com/mnishiguchi/avmodbus/blob/main/docs/adr/0007-isolate-modbus-tcp-connections.md)
+[ADR 0007](https://github.com/piyopiyoex/avmodbus/blob/main/docs/adr/0007-isolate-modbus-tcp-connections.md)
 に記録しています。
 
 対象 AtomVM は Modbus/TCP Security に必要な相互認証 TLS に対応していません。
@@ -195,9 +195,9 @@ CI の `interoperability` job の結果も、リリース前に確認してく�
 ケーブルの切断・再接続、メモリ測定、リソース回復テストの手順をまとめています。
 
 測定した数値は
-[リソース計測](https://github.com/mnishiguchi/avmodbus/blob/main/docs/development/resource-measurements.md)と
-[開発記録](https://github.com/mnishiguchi/avmodbus/blob/main/docs/development/worklog.md)
+[リソース計測](https://github.com/piyopiyoex/avmodbus/blob/main/docs/development/resource-measurements.md)と
+[開発記録](https://github.com/piyopiyoex/avmodbus/blob/main/docs/development/worklog.md)
 に残しています。
 リリース前の確認には
-[チェックリスト](https://github.com/mnishiguchi/avmodbus/blob/main/docs/development/release-checklist.md)
+[チェックリスト](https://github.com/piyopiyoex/avmodbus/blob/main/docs/development/release-checklist.md)
 を使ってください。

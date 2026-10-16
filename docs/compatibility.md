@@ -35,5 +35,5 @@ distributed Erlang carrier は AVModbus core の機能ではなく、production-
 成功・失敗の件数、再現手順を記録してください。
 メモリ測定やエラーログがあれば一緒に残します。
 実験結果の背景は
-[開発記録](https://github.com/mnishiguchi/avmodbus/blob/main/docs/development/worklog.md)
+[開発記録](https://github.com/piyopiyoex/avmodbus/blob/main/docs/development/worklog.md)
 を参照してください。

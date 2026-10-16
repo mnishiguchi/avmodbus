@@ -211,4 +211,4 @@ transport は UART / RTU receive buffer に残った以前の boot session の p
 - [AtomVM](https://github.com/atomvm/AtomVM)
 - [AtomVM distributed Erlang documentation](https://doc.atomvm.org/release-0.7/distributed-erlang.html)
 - [direct UART serial distribution experiment](https://github.com/mnishiguchi/hello_atomvm_serial_disterl)
-- [AVModbus](https://github.com/mnishiguchi/avmodbus)
+- [AVModbus](https://github.com/piyopiyoex/avmodbus)

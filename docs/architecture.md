@@ -42,7 +42,7 @@ Client / Server が UART を管理していれば再接続を試みます。
 方向切り替えが必要な RS485 モジュールでは、その処理を Transport の `write/2` に含めます。
 Client / Server 自体は GPIO を操作しません。
 判断理由は
-[ADR 0019](https://github.com/mnishiguchi/avmodbus/blob/main/docs/adr/0019-keep-uart-configuration-at-transport-boundary.md)
+[ADR 0019](https://github.com/piyopiyoex/avmodbus/blob/main/docs/adr/0019-keep-uart-configuration-at-transport-boundary.md)
 にあります。
 
 ## Client の管理
@@ -69,7 +69,7 @@ TCP の `max_buffer`（既定 2,048 byte）は **受信ブローカーがまだ�
 listener が生きていれば handler を終了するための代替処理を行います。
 終了待ちは無期限にならないよう制限しています。
 詳細は
-[ADR 0007](https://github.com/mnishiguchi/avmodbus/blob/main/docs/adr/0007-isolate-modbus-tcp-connections.md)
+[ADR 0007](https://github.com/piyopiyoex/avmodbus/blob/main/docs/adr/0007-isolate-modbus-tcp-connections.md)
 に残しています。
 
 ## AtomVM での制約
@@ -79,6 +79,6 @@ listener が生きていれば handler を終了するための代替処理を�
 - RTU の既定タイミングは検証済みの UART / RS485 構成に基づきます。
 
 これらの詳細は
-[既知の TCP 制約](https://github.com/mnishiguchi/avmodbus/blob/main/docs/limitations.md) と
-[開発記録](https://github.com/mnishiguchi/avmodbus/blob/main/docs/development/worklog.md)
+[既知の TCP 制約](https://github.com/piyopiyoex/avmodbus/blob/main/docs/limitations.md) と
+[開発記録](https://github.com/piyopiyoex/avmodbus/blob/main/docs/development/worklog.md)
 を参照してください。
