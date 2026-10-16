@@ -3,7 +3,7 @@ defmodule DisterlProbe.ModbusUARTTest do
 
   import ExUnit.CaptureIO
 
-  alias DisterlProbe.{Channel, ModbusUART, Protocol, ResponseTimeout}
+  alias DisterlProbe.{Channel, ModbusUART, Protocol, ResponseFault, ResponseTimeout}
 
   test "chunks and reassembles a 64 KiB stream despite repeated lost responses" do
     pattern = for byte <- 0..255, into: <<>>, do: <<byte>>
@@ -102,6 +102,52 @@ defmodule DisterlProbe.ModbusUARTTest do
     assert next.rx_buffer == <<>>
     assert ResponseTimeout.current(next.response_timeout) == 500
     refute next.trace_queue_active
+  end
+
+  test "a new read closes and replaces a stale blocked reader" do
+    first_tag = make_ref()
+    second_tag = make_ref()
+    state = adapter_state(Channel.new())
+
+    assert {:noreply, state} =
+             ModbusUART.handle_call({:read, :infinity}, {self(), first_tag}, state)
+
+    assert {:noreply, next} =
+             ModbusUART.handle_call({:read, :infinity}, {self(), second_tag}, state)
+
+    assert_receive {^first_tag, {:error, :closed}}
+    assert {{reader_pid, ^second_tag}, reference, nil, :infinity} = next.reader
+    assert reader_pid == self()
+    assert is_reference(reference)
+    refute_receive {^second_tag, _reply}
+  end
+
+  test "a peer session change closes an established infinite reader" do
+    reader_tag = make_ref()
+    channel = %{Channel.new(100) | peer_session: 200}
+
+    state =
+      channel
+      |> adapter_state()
+      |> Map.put(:role, :server)
+      |> Map.put(:reader, {{self(), reader_tag}, make_ref(), nil, :infinity})
+      |> Map.put(:response_fault, ResponseFault.new())
+      |> Map.put(:rx_buffer, "stale receive stream")
+      |> Map.update!(:response_timeout, &ResponseTimeout.observe_write(&1, 192, 96))
+
+    {:ok, incoming} = Protocol.encode(201, 0, 0, 0, <<>>)
+
+    assert {:reply, {:ok, response}, next} = callback({:exchange, incoming}, state)
+    assert_receive {^reader_tag, {:error, :closed}}
+
+    assert next.channel.peer_session == 201
+    assert next.reader == nil
+    assert next.rx_buffer == <<>>
+    assert ResponseTimeout.current(next.response_timeout) == 500
+
+    assert {:ok, packet} = Protocol.decode(response)
+    assert packet.session == 100
+    assert packet.acknowledged_session == 201
   end
 
   defp transfer(sender, receiver, reassembled, chunks, retries) do

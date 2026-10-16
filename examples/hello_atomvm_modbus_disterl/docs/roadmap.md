@@ -45,6 +45,7 @@
 - [x] queue-full後のsession rollover、peer boundary伝播、新streamの双方向配送を一連のhost testで固定する
 - [x] `ModbusUART.write` のqueue-full時にsession、receive buffer、timeoutが同時にresetされることをhost testで固定する
 - [x] local session rolloverで32-bit randomが直前のIDと一致しても、異なるIDを選ぶことをhost testで固定する
+- [x] stale blocked readerの置換とpeer session change時のinfinite reader closeをadapter-level host testで固定する
 - [x] 2-node proof of concept では virtual UART adapter を維持し、専用 `modbus_dist` carrier は実装しないと判断する
   （[ADR 0003](adr/0003-adapt-serial-dist-with-a-virtual-uart.md)）
 
