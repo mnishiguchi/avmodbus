@@ -201,10 +201,14 @@ transport は UART / RTU receive buffer に残った以前の boot session の p
 | `MODBUS_RESPONSE_TIMEOUT_MS` | `1000` / `500` | Phase 1 / Phase 2 transaction timeout |
 | `MODBUS_BULK_RESPONSE_TIMEOUT_MS` | `2000` | multi-chunk write 後の transaction timeout |
 | `MODBUS_CHUNK_PAYLOAD_BYTES` | `96` | virtual UART の operating chunk size（protocol 上限は 232） |
-| `MODBUS_MAX_QUEUED_BYTES` | `16384` | in-flight と pending を合わせた outgoing payload byte 上限 |
+| `MODBUS_MAX_QUEUED_BYTES` | `8192` | in-flight と pending を合わせた outgoing payload byte 上限 |
 | `MODBUS_MAX_QUEUED_CHUNKS` | `256` | in-flight と pending を合わせた outgoing chunk 数上限 |
 | `MODBUS_POLL_INTERVAL_MS` | `1000` / `20` | Phase 1 / Phase 2 polling interval |
 | `MODBUS_TRACE_TRANSACTIONS` | unset | `1` / `true` で non-idle transaction と全 failure の size、latency、累積成否を記録 |
+| `MODBUS_TRACE_QUEUE` | unset | `1` / `true` で queue state と ESP32 heap 指標を記録 |
+| `MODBUS_FAULT_DROP_RESPONSES` | `0` | Server が受理後に exception へ置き換える FC-100 response 数 |
+| `MODBUS_FAULT_MIN_PAYLOAD_BYTES` | `96` | response fault の対象にする最小 transport payload size |
+| `MODBUS_FAULT_AFTER_MS` | `10000` | Server adapter 起動から response fault を有効にするまでの delay |
 | `MODBUS_START_DELAY_MS` | `0` / `3000` | Phase 1 と Server / Phase 2 Client の startup delay |
 | `ATOMVM_NODE_ALIAS` | role から `a` / `b` | local node alias |
 | `ATOMVM_PEER_ALIAS` | role から `b` / `a` | peer node alias |
@@ -213,6 +217,7 @@ transport は UART / RTU receive buffer に残った以前の boot session の p
 | `DISTERL_PING_DELAY_MS` | `2000` | 最初の ping と、成功または timeout 後の次の ping までの delay |
 | `DISTERL_PONG_TIMEOUT_MS` | `15000` | pong timeout |
 | `DISTERL_PAYLOAD_BYTES` | `0` | ping/pong で検証する deterministic payload size |
+| `DISTERL_QUEUE_FULL_PROBE_BYTES` | `0` | Client の最初の ping だけに使う queue-full 診断 payload size |
 
 これらは `Application.compile_env/3` で application に埋め込まれます。値を変更する
 ときは `mix clean` して、同じ environment で pack / flash してください。
@@ -228,9 +233,18 @@ Client を Server より3秒以上先に起動する構成や、runtimeのhalf-o
 [bidirectional multi-chunk round trip](docs/worklog/2026-10-16-bidirectional-multichunk.md) を参照してください。
 
 outgoing queue は byte 数と chunk 数の両方で制限します。1 回の write 全体が収まらない場合は partial data を
-queue に残さず `{:error, :queue_full}` を返し、`serial_dist` connection を fail fast させます。既定の 16 KiB は
-payload の合計だけを数えるため、ESP32-C5 の厳密な heap 使用量上限ではありません。設計理由は
-[ADR 0008](docs/adr/0008-bound-the-virtual-uart-queue.md) を参照してください。
+queue に残さず `{:error, :queue_full}` を返し、`serial_dist` connection を fail fast させます。既定の 8 KiB は
+payload の合計だけを数えるため、ESP32-C5 の厳密な heap 使用量上限ではありません。また `serial_dist` は adapter を
+呼ぶ前に frame binary を構築するため、この上限は upstream allocation を防ぎません。16 KiB probe は queue check 前に
+OOM、8 KiB cap の 8,304-byte write は正常に queue-full となったため default を下げました。設計理由は
+[ADR 0008](docs/adr/0008-bound-the-virtual-uart-queue.md) と
+[ADR 0010](docs/adr/0010-reduce-default-queue-byte-limit.md) を参照してください。
+
+`MODBUS_FAULT_*`、`MODBUS_TRACE_QUEUE`、`DISTERL_QUEUE_FULL_PROBE_BYTES` は fault / memory 調査専用です。
+通常の使用例では設定しません。response fault は Server が request を Channel に受理した後で response だけを
+`server_device_failure` に置き換えるため、Client の同一 sequence 再送と Server の duplicate suppression を実機で
+確認できます。再現条件と観測値は
+[Queue memory と ACK-loss](docs/worklog/2026-10-16-queue-memory-and-ack-loss.md) に記録しています。
 
 ## References
 

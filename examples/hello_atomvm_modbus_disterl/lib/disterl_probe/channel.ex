@@ -12,7 +12,7 @@ defmodule DisterlProbe.Channel do
 
   @max_sequence 65_535
   @stale_ack_window div(@max_sequence, 2)
-  @default_max_queued_bytes 16_384
+  @default_max_queued_bytes 8_192
   @default_max_queued_chunks 256
 
   def new, do: new(Session.new_id(), [])

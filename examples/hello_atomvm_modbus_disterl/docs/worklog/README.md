@@ -6,6 +6,7 @@
 
 ## 記録
 
+- [2026-10-16: Queue memory と ACK-loss](2026-10-16-queue-memory-and-ack-loss.md)
 - [2026-10-16: initial-handshake liveness と起動順序mitigation](2026-10-16-initial-handshake-liveness.md)
 - [2026-10-16: 外部 review follow-up — bounded queue と RTU frame size](2026-10-16-review-follow-up.md)
 - [2026-10-16: 4 KiB 転送中の Server reboot recovery](2026-10-16-active-transfer-recovery.md)

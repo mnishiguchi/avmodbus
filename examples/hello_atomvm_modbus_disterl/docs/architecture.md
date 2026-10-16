@@ -29,7 +29,7 @@ Node B sends queued data only in a response to a poll.
 - virtual UART の default operating chunk は 96 bytes で、FC-100 header、PDU、RTU framing を含む request / response を
   113 bytes に抑える。`MODBUS_CHUNK_PAYLOAD_BYTES` で 1..232 の範囲を指定できる
 - 各方向で 1 chunk を in-flight にし、それ以降は FIFO に保持する
-- outgoing queue は in-flight と pending を合わせて default 16 KiB / 256 chunks に制限する。byte 数は application / stream
+- outgoing queue は in-flight と pending を合わせて default 8 KiB / 256 chunks に制限する。byte 数は application / stream
   payload だけを数え、Elixir term、binary、protocol header の実メモリ overhead は含めない
 - pending FIFO は two-list queue とし、enqueue / dequeue を amortized O(1) にする
 - 1 回の virtual UART write が上限を超える場合は partial chunk を state に残さず `{:error, :queue_full}` を返す。
@@ -70,6 +70,15 @@ AtomVMの`:serial_dist`を直接使用し、example独自のsetup retry wrapper�
 response byte 数、経過時間、poll 番号、最大 latency、累積 success / failure 数を出力します。13-byte の
 empty poll 成功は timing への影響を抑えるため出力せず、counter にだけ含めます。通常実行では最初の
 3 failure だけを表示します。
+
+`MODBUS_TRACE_QUEUE=1` では open、2-byte sync / 10-byte tick 以外の write accepted / rejected、対象 queue の drain 時に
+payload byte 数、chunk 数と `esp32_free_heap_size`、`esp32_largest_free_block`、`esp32_minimum_free_size` を記録します。
+これは診断用であり、console 出力自体の allocation と timing への影響を含みます。
+
+Server の opt-in response fault は incoming packet を通常どおり Channel に受理した後、wire response を Modbus
+`server_device_failure` exception に置き換えます。受信 sequence は進むため、Client の再送は duplicate として抑止され、
+fault budget が尽きた後の response で同じ sequence を ACK します。通常動作と fault injection の state machine を
+分岐させず、実機上で lost-ACK 相当の条件を作るための example-local 診断です。
 
 ```text
 net_kernel / dist_util / distribution controller

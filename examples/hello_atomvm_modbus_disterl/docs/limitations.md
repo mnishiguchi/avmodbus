@@ -5,9 +5,15 @@
 
 - 2 node、single Unit ID、single Modbus client のみを対象とします。
 - Node B は自発的に bus を駆動できず、Node A の poll latency に制約されます。
-- virtual UART の outgoing queue は default 16 KiB / 256 chunks で、新しい write が上限を超えると
+- virtual UART の outgoing queue は default 8 KiB / 256 chunks で、新しい write が上限を超えると
   `{:error, :queue_full}` を返し、`serial_dist` connection は fail fast します。byte limit は payload の合計であり、
-  Elixir term や binary の runtime overhead を含む厳密な heap 上限ではありません。
+  Elixir term や binary の runtime overhead を含む厳密な heap 上限ではありません。さらに `serial_dist_controller` は
+  adapter 呼び出し前に frame binary を作るため、16 KiB application payload は queue check に到達する前に実機で
+  OOM になりました。8 KiB application payload / 8 KiB cap は 8,304-byte write を `:queue_full` で拒否できました。
+- queue-full 後は controller が意図どおり `serial_write_error` で終了しましたが、同じ run の再接続 handshake は
+  `crc_error` で失敗しました。既知の half-open distribution connection cleanup が解決するまで、自動復旧は保証しません。
+- 4 KiB / 44-chunk outgoing write に対し、受理済み response を3回失敗させても duplicate delivery なしで queue を
+  drainし、ping/pongを完了しました。これは limited fault run であり、長時間 ACK loss の memory stability 保証ではありません。
 - 16-bit sequence の wraparound は host test 済みですが、65,535 message をまたぐ長時間の実機試験は未実施です。
 - session ID は起動時に生成する 32-bit random value であり、永続的な node identity や collision 検出はありません。
 - session 変更時の transport resynchronization と、client-only / server-only reboot 後の

@@ -10,7 +10,15 @@ defmodule DisterlProbe.ModbusUART do
   use GenServer
 
   alias AVModbus.{Client, Server}
-  alias DisterlProbe.{Channel, Protocol, ResponseTimeout, TransactionStats}
+
+  alias DisterlProbe.{
+    Channel,
+    MemorySnapshot,
+    Protocol,
+    ResponseFault,
+    ResponseTimeout,
+    TransactionStats
+  }
 
   @function_code 100
   @max_payload Protocol.max_payload()
@@ -90,12 +98,24 @@ defmodule DisterlProbe.ModbusUART do
       chunk_payload_bytes: Keyword.fetch!(options, :chunk_payload_bytes),
       poll_ms: Keyword.fetch!(options, :poll_ms),
       request_ref: nil,
-      stats: TransactionStats.new(Keyword.get(options, :trace_transactions, false))
+      stats: TransactionStats.new(Keyword.get(options, :trace_transactions, false)),
+      trace_queue: Keyword.get(options, :trace_queue, false),
+      trace_queue_active: false,
+      response_fault:
+        ResponseFault.new(
+          [
+            drop_responses: Keyword.get(options, :fault_drop_responses, 0),
+            min_payload_bytes: Keyword.get(options, :fault_min_payload_bytes, 96),
+            after_ms: Keyword.get(options, :fault_after_ms, 10_000)
+          ],
+          now_ms()
+        )
     }
 
     case open_transport(role, Keyword.fetch!(options, :serial), state) do
       {:ok, resource} ->
         IO.puts("modbus_uart: opened role=#{role} session=#{state.channel.session}")
+        log_queue("opened", state, 0)
         if role == :client, do: send(self(), :poll)
         {:ok, %{state | resource: resource}}
 
@@ -118,13 +138,23 @@ defmodule DisterlProbe.ModbusUART do
           )
 
         log_timeout_change(state.response_timeout, response_timeout, byte_size(data))
-        {:reply, :ok, %{state | channel: channel, response_timeout: response_timeout}}
+
+        next = %{
+          state
+          | channel: channel,
+            response_timeout: response_timeout,
+            trace_queue_active: state.trace_queue_active or traceable_write?(byte_size(data))
+        }
+
+        log_queue("accepted", next, byte_size(data))
+        {:reply, :ok, next}
 
       {:error, _reason} = error ->
         IO.puts(
           "modbus_uart: queue rejected bytes=#{byte_size(data)} reason=#{inspect(elem(error, 1))}"
         )
 
+        log_queue("rejected", state, byte_size(data))
         {:reply, error, state}
     end
   end
@@ -146,8 +176,23 @@ defmodule DisterlProbe.ModbusUART do
   end
 
   def handle_call({:exchange, payload}, _from, %{role: :server} = state) do
-    case receive_exchange(state, payload) do
-      {:ok, next, reply} -> {:reply, {:ok, reply}, next}
+    with {:ok, incoming} <- Protocol.decode(payload),
+         {:ok, next, reply} <- receive_decoded_exchange(state, incoming) do
+      case ResponseFault.after_accept(
+             next.response_fault,
+             byte_size(incoming.payload),
+             now_ms()
+           ) do
+        {:reply, response_fault} ->
+          {:reply, {:ok, reply}, %{next | response_fault: response_fault}}
+
+        {:drop, response_fault} ->
+          log_dropped_response(response_fault, incoming)
+
+          {:reply, {:error, {:exception, :server_device_failure}},
+           %{next | response_fault: response_fault}}
+      end
+    else
       {:error, _reason} -> {:reply, {:error, {:exception, :illegal_data_value}}, state}
     end
   end
@@ -259,12 +304,19 @@ defmodule DisterlProbe.ModbusUART do
   end
 
   defp receive_exchange(state, binary) do
-    with {:ok, incoming} <- Protocol.decode(binary),
-         {:ok, channel, delivered} <- Channel.receive_packet(state.channel, incoming),
+    with {:ok, incoming} <- Protocol.decode(binary) do
+      receive_decoded_exchange(state, incoming)
+    end
+  end
+
+  defp receive_decoded_exchange(state, incoming) do
+    previous_channel = state.channel
+
+    with {:ok, channel, delivered} <- Channel.receive_packet(previous_channel, incoming),
          stream <- reset_restarted_peer(state, incoming.session),
          next <- deliver(stream, channel, delivered),
          {:ok, reply} <- Channel.packet(next.channel) do
-      {:ok, next, reply}
+      {:ok, maybe_log_drained_queue(previous_channel, next), reply}
     end
   end
 
@@ -382,4 +434,36 @@ defmodule DisterlProbe.ModbusUART do
 
   defp log_adapter_failure(reason),
     do: IO.puts("modbus_uart: invalid exchange #{inspect(reason)}; retrying")
+
+  defp log_queue(_event, %{trace_queue: false}, _write_bytes), do: :ok
+  defp log_queue("accepted", _state, write_bytes) when write_bytes in [2, 10], do: :ok
+
+  defp log_queue(event, state, write_bytes) do
+    IO.puts(
+      "modbus_uart: queue event=#{event} write_bytes=#{write_bytes} " <>
+        "queued_bytes=#{state.channel.queued_bytes} outstanding=#{state.channel.outstanding} " <>
+        MemorySnapshot.format(MemorySnapshot.capture())
+    )
+  end
+
+  defp maybe_log_drained_queue(
+         %{queued_bytes: previous_bytes},
+         %{channel: %{queued_bytes: 0}, trace_queue_active: true} = next
+       )
+       when previous_bytes > 0 do
+    log_queue("drained", next, 0)
+    %{next | trace_queue_active: false}
+  end
+
+  defp maybe_log_drained_queue(_previous_channel, next), do: next
+
+  defp traceable_write?(write_bytes), do: write_bytes not in [2, 10]
+
+  defp log_dropped_response(response_fault, incoming) do
+    IO.puts(
+      "modbus_uart: fault dropped accepted response count=#{response_fault.dropped} " <>
+        "remaining=#{response_fault.remaining} sequence=#{incoming.sequence} " <>
+        "payload_bytes=#{byte_size(incoming.payload)}"
+    )
+  end
 end

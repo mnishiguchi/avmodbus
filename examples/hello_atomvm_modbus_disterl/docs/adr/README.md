@@ -24,3 +24,4 @@
 - [0007: peer session の観測を stream synchronization boundary とする](0007-treat-peer-session-as-a-stream-boundary.md)
 - [0008: virtual UART の outgoing queue を制限する](0008-bound-the-virtual-uart-queue.md)
 - [0009: Client の distribution startup を遅らせる](0009-stagger-distribution-startup.md)
+- [0010: outgoing queue の default byte 上限を 8 KiB に下げる](0010-reduce-default-queue-byte-limit.md)

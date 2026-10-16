@@ -54,6 +54,15 @@ defmodule DisterlProbe.ModbusUARTTest do
     assert channel.queued_bytes == 0
   end
 
+  test "the default byte bound accepts 8 KiB exactly and rejects one more byte" do
+    payload = :binary.copy(<<0xA5>>, 8_192)
+
+    assert {:ok, channel} = ModbusUART.queue_chunks(Channel.new(500), payload, 96)
+    assert channel.queued_bytes == 8_192
+    assert channel.outstanding == 86
+    assert Channel.queue(channel, <<0>>) == {:error, :queue_full}
+  end
+
   defp transfer(sender, receiver, reassembled, chunks, retries) do
     {:ok, request} = packet(sender)
     {:ok, receiver, delivered} = Channel.receive_packet(receiver, request)

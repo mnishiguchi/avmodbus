@@ -11,8 +11,12 @@ mode = if System.get_env("MODBUS_EXPERIMENT") == "disterl", do: :disterl, else: 
 role = if System.get_env("MODBUS_ROLE") == "server", do: :server, else: :client
 ping_payload_bytes = parse_integer.("DISTERL_PAYLOAD_BYTES", 0)
 chunk_payload_bytes = parse_integer.("MODBUS_CHUNK_PAYLOAD_BYTES", 96)
-max_queued_bytes = parse_integer.("MODBUS_MAX_QUEUED_BYTES", 16_384)
+max_queued_bytes = parse_integer.("MODBUS_MAX_QUEUED_BYTES", 8_192)
 max_queued_chunks = parse_integer.("MODBUS_MAX_QUEUED_CHUNKS", 256)
+drop_responses = parse_integer.("MODBUS_FAULT_DROP_RESPONSES", 0)
+fault_min_payload_bytes = parse_integer.("MODBUS_FAULT_MIN_PAYLOAD_BYTES", 96)
+fault_after_ms = parse_integer.("MODBUS_FAULT_AFTER_MS", 10_000)
+queue_full_probe_bytes = parse_integer.("DISTERL_QUEUE_FULL_PROBE_BYTES", 0)
 default_start_delay_ms = if mode == :disterl and role == :client, do: 3_000, else: 0
 start_delay_ms = parse_integer.("MODBUS_START_DELAY_MS", default_start_delay_ms)
 
@@ -30,6 +34,22 @@ end
 
 if max_queued_chunks < 1 or max_queued_chunks > 65_535 do
   raise ArgumentError, "MODBUS_MAX_QUEUED_CHUNKS must be between 1 and 65535"
+end
+
+if drop_responses < 0 do
+  raise ArgumentError, "MODBUS_FAULT_DROP_RESPONSES must be a non-negative integer"
+end
+
+if fault_min_payload_bytes < 0 or fault_min_payload_bytes > 232 do
+  raise ArgumentError, "MODBUS_FAULT_MIN_PAYLOAD_BYTES must be between 0 and 232"
+end
+
+if fault_after_ms < 0 do
+  raise ArgumentError, "MODBUS_FAULT_AFTER_MS must be a non-negative integer"
+end
+
+if queue_full_probe_bytes < 0 do
+  raise ArgumentError, "DISTERL_QUEUE_FULL_PROBE_BYTES must be a non-negative integer"
 end
 
 if start_delay_ms < 0 do
@@ -72,12 +92,17 @@ config :disterl_probe,
   chunk_payload_bytes: chunk_payload_bytes,
   max_queued_bytes: max_queued_bytes,
   max_queued_chunks: max_queued_chunks,
+  fault_drop_responses: drop_responses,
+  fault_min_payload_bytes: fault_min_payload_bytes,
+  fault_after_ms: fault_after_ms,
   poll_ms: parse_integer.("MODBUS_POLL_INTERVAL_MS", if(mode == :disterl, do: 20, else: 1_000)),
   trace_transactions: System.get_env("MODBUS_TRACE_TRANSACTIONS") in ["1", "true"],
+  trace_queue: System.get_env("MODBUS_TRACE_QUEUE") in ["1", "true"],
   node_alias: System.get_env("ATOMVM_NODE_ALIAS") || if(role == :server, do: "b", else: "a"),
   peer_alias: System.get_env("ATOMVM_PEER_ALIAS") || if(role == :server, do: "a", else: "b"),
   cookie: System.get_env("ATOMVM_COOKIE") || "AtomVM",
   ping_count: parse_integer.("DISTERL_PING_COUNT", 3),
   ping_delay_ms: parse_integer.("DISTERL_PING_DELAY_MS", 2_000),
   pong_timeout_ms: parse_integer.("DISTERL_PONG_TIMEOUT_MS", 15_000),
-  ping_payload_bytes: ping_payload_bytes
+  ping_payload_bytes: ping_payload_bytes,
+  queue_full_probe_bytes: queue_full_probe_bytes

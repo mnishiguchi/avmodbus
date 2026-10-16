@@ -10,6 +10,11 @@ defmodule DisterlProbe.PingPong do
   @ping_delay_ms Application.compile_env(:disterl_probe, :ping_delay_ms, 2_000)
   @pong_timeout_ms Application.compile_env(:disterl_probe, :pong_timeout_ms, 15_000)
   @payload_bytes Application.compile_env(:disterl_probe, :ping_payload_bytes, 0)
+  @queue_full_probe_bytes Application.compile_env(
+                            :disterl_probe,
+                            :queue_full_probe_bytes,
+                            0
+                          )
 
   def start_link(identity, started_at),
     do: GenServer.start_link(__MODULE__, {identity, started_at}, name: @name)
@@ -17,7 +22,14 @@ defmodule DisterlProbe.PingPong do
   @impl true
   def init({identity, started_at}) do
     payload = Payload.build(@payload_bytes)
+    queue_full_probe = build_queue_full_probe(identity.role)
     IO.puts("modbus_disterl: registered #{inspect(@name)} payload_bytes=#{@payload_bytes}")
+
+    if queue_full_probe != nil do
+      IO.puts(
+        "modbus_disterl: queue-full probe armed payload_bytes=#{byte_size(queue_full_probe)}"
+      )
+    end
 
     if identity.role == :client do
       Process.send_after(self(), :send_ping, @ping_delay_ms)
@@ -28,6 +40,7 @@ defmodule DisterlProbe.PingPong do
        identity: identity,
        started_at: started_at,
        payload: payload,
+       queue_full_probe: queue_full_probe,
        pending: nil,
        next_id: 1,
        ping_stats: PingStats.new(),
@@ -49,14 +62,15 @@ defmodule DisterlProbe.PingPong do
   def handle_info(:send_ping, %{pending: nil} = state) do
     id = state.next_id
     sent_at = :erlang.monotonic_time(:millisecond)
+    {payload, queue_full_probe} = next_payload(state)
 
     IO.puts(
-      "modbus_disterl: sending ping #{id} to #{inspect(state.identity.peer)} payload_bytes=#{byte_size(state.payload)}"
+      "modbus_disterl: sending ping #{id} to #{inspect(state.identity.peer)} payload_bytes=#{byte_size(payload)}"
     )
 
-    send({@name, state.identity.peer}, {:ping, self(), id, state.payload})
+    send({@name, state.identity.peer}, {:ping, self(), id, payload})
     Process.send_after(self(), {:pong_timeout, id}, @pong_timeout_ms)
-    {:noreply, %{state | pending: {id, sent_at}}}
+    {:noreply, %{state | pending: {id, sent_at}, queue_full_probe: queue_full_probe}}
   end
 
   def handle_info({:ping, from, id, payload}, state) when is_pid(from) and is_binary(payload) do
@@ -135,4 +149,12 @@ defmodule DisterlProbe.PingPong do
 
   defp valid_payload?(payload),
     do: byte_size(payload) == @payload_bytes and Payload.valid?(payload)
+
+  defp build_queue_full_probe(:client) when @queue_full_probe_bytes > 0,
+    do: Payload.build(@queue_full_probe_bytes)
+
+  defp build_queue_full_probe(_role), do: nil
+
+  defp next_payload(%{queue_full_probe: nil, payload: payload}), do: {payload, nil}
+  defp next_payload(%{queue_full_probe: probe}), do: {probe, nil}
 end
