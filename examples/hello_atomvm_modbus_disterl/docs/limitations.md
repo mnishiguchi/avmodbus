@@ -15,7 +15,9 @@
   96-byte chunk 受信後に Server を reboot しても、1 回の pong timeout 後に message を再送して復旧しました。
 - 直前の traffic が UART / RTU buffer に残り、Client が Server より約 1〜2 秒先に起動した 2 run では、initial
   handshake 中の peer session change 後に application ping retry だけでは新しい handshake が始まりませんでした。
-  Server-first startup では回避できましたが、session change 後の connection retry trigger は未解決です。
+  defaultのPhase 2 Clientには3秒のstartup delayを入れ、約1.5秒Client先行の2 runでping/pong 3 / 3、timeout 0を
+  確認しました。ただしこれは起動順序によるmitigationであり、session change後のhalf-open connection cleanupと
+  connection retry trigger自体は未解決です。Clientが3秒以上先に起動する条件は保証しません。
 - AtomVM `net_kernel` の distribution setup timeout は 7 秒固定です。9,600 baud の検証構成では成功しましたが、
   1,000 ms poll interval では setup timeout になりました。500 ms は 1 回成功したものの安全域とはみなさず、20 ms を
   default とします。

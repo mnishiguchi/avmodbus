@@ -23,3 +23,4 @@
 - [0006: protocol 上限と operating chunk size を分離する](0006-separate-protocol-and-operating-chunk-size.md)
 - [0007: peer session の観測を stream synchronization boundary とする](0007-treat-peer-session-as-a-stream-boundary.md)
 - [0008: virtual UART の outgoing queue を制限する](0008-bound-the-virtual-uart-queue.md)
+- [0009: Client の distribution startup を遅らせる](0009-stagger-distribution-startup.md)

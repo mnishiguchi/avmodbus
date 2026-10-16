@@ -114,4 +114,9 @@ Server-first の controlled startup では発生せず、確立済み connection
 終了した後の connection 再試行が進まない liveness 問題に見える。transport、`serial_dist` link manager、application retry の
 どこで明示的な再接続 trigger が必要かを、host で再現してから修正する。
 
+follow-upのsource調査では、AtomVM `net_kernel`のpending entryとpeer側half-open connectionを同時に扱う必要があり、
+example-localなsetup retryは安全でないと判断した。default Client startupを3秒遅らせるmitigationと2 runの実機結果は
+[initial-handshake livenessの調査](2026-10-16-initial-handshake-liveness.md)に記録している。根本のretry lifecycleは
+引き続き未解決である。
+
 試験後、両 board は 9,600 baud / 20 ms poll / zero-byte payload の default distributed Erlang firmware へ戻した。

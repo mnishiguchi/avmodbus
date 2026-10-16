@@ -37,7 +37,9 @@
 - [x] default の 9,600 baud で 4 KiB payload の 3-message consecutive traffic を実機確認する
 - [x] 4 KiB stream の最初の chunk 受信後に Server を reboot し、timeout 後の message 再送まで実機確認する
 - [x] outgoing queue を payload byte 数と chunk 数で制限し、amortized O(1) の FIFO に変更する
-- [ ] initial handshake 中の session change 後に connection retry が進まない startup race を host で再現して修正する
+- [x] initial handshakeのliveness failureをAtomVM sourceと実機で調査し、example-local setup retryを棄却する
+- [x] Phase 2 Clientのdefault startupを3秒遅らせ、約1.5秒Client先行の2 runで起動順序mitigationを実機確認する
+- [ ] AtomVM側でhalf-open connection cleanupとconnection retryを修正し、startup delayなしで再検証する
 - [ ] ACK-loss 下で default 16 KiB / 256-chunk queue の free heap、queue-full、controller recovery を実機測定する
 - [x] 2-node proof of concept では virtual UART adapter を維持し、専用 `modbus_dist` carrier は実装しないと判断する
   （[ADR 0003](adr/0003-adapt-serial-dist-with-a-virtual-uart.md)）

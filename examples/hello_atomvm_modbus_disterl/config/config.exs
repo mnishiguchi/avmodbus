@@ -13,6 +13,8 @@ ping_payload_bytes = parse_integer.("DISTERL_PAYLOAD_BYTES", 0)
 chunk_payload_bytes = parse_integer.("MODBUS_CHUNK_PAYLOAD_BYTES", 96)
 max_queued_bytes = parse_integer.("MODBUS_MAX_QUEUED_BYTES", 16_384)
 max_queued_chunks = parse_integer.("MODBUS_MAX_QUEUED_CHUNKS", 256)
+default_start_delay_ms = if mode == :disterl and role == :client, do: 3_000, else: 0
+start_delay_ms = parse_integer.("MODBUS_START_DELAY_MS", default_start_delay_ms)
 
 if ping_payload_bytes < 0 do
   raise ArgumentError, "DISTERL_PAYLOAD_BYTES must be a non-negative integer"
@@ -28,6 +30,10 @@ end
 
 if max_queued_chunks < 1 or max_queued_chunks > 65_535 do
   raise ArgumentError, "MODBUS_MAX_QUEUED_CHUNKS must be between 1 and 65535"
+end
+
+if start_delay_ms < 0 do
+  raise ArgumentError, "MODBUS_START_DELAY_MS must be a non-negative integer"
 end
 
 serial = [
@@ -59,7 +65,7 @@ config :disterl_probe,
   role: role,
   serial: serial,
   unit_id: parse_integer.("MODBUS_UNIT_ID", 1),
-  start_delay_ms: parse_integer.("MODBUS_START_DELAY_MS", 0),
+  start_delay_ms: start_delay_ms,
   timeout_ms:
     parse_integer.("MODBUS_RESPONSE_TIMEOUT_MS", if(mode == :disterl, do: 500, else: 1_000)),
   bulk_timeout_ms: parse_integer.("MODBUS_BULK_RESPONSE_TIMEOUT_MS", 2_000),

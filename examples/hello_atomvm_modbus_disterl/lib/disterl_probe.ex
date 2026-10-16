@@ -101,7 +101,7 @@ defmodule DisterlProbe do
 
   defp maybe_delay_start do
     if @start_delay_ms > 0 do
-      IO.puts("disterl_probe: delaying #{@start_delay_ms} ms for recovery test")
+      IO.puts("disterl_probe: delaying #{@start_delay_ms} ms before startup")
       Process.sleep(@start_delay_ms)
     end
   end

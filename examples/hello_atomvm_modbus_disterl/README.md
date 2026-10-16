@@ -34,8 +34,10 @@ baud / poll matrix では 9,600–115,200 baud と 20 ms poll の zero-byte ping
 確立済み connection では、2回目の 4 KiB upload の最初の 96-byte chunk を Server が受信した直後に Server を
 reboot しても、Client が session 変更を検出し、1回の pong timeout 後に同じ message を再送して復旧しました。
 一方、initial handshake 中に stale session から現在の session へ切り替わった後、connection retry が進まない
-起動順序依存も見つかっています。条件とログは
-[active-transfer reboot recovery](docs/worklog/2026-10-16-active-transfer-recovery.md) に記録しています。
+起動順序依存も見つかっています。default build は Client の distribution startup を 3 秒遅らせ、Server を先に
+ready にすることでこの条件を避けます。これは AtomVM の half-open connection cleanup を修正するものではありません。
+調査、棄却した retry wrapper、2 run の実機結果は
+[initial-handshake liveness investigation](docs/worklog/2026-10-16-initial-handshake-liveness.md) に記録しています。
 
 アーキテクチャ、制限、設計判断の一覧は [docs/README.md](docs/README.md)、詳細な実機ログと観察結果は
 [2026-10-15-hardware-verification.md](docs/worklog/2026-10-15-hardware-verification.md) にあります。
@@ -148,7 +150,8 @@ MODBUS_EXPERIMENT=disterl MIX_ENV=prod \
   mix atomvm.esp32.flash --port /dev/ttyACM1
 ```
 
-両方をほぼ同時に reset / power-cycle して monitor します。transport version 2 は
+両方をほぼ同時に reset / power-cycle して monitor します。default では Client が 3 秒待ってから `net_kernel` と
+Modbus UART を起動するため、Server が先に ready になります。transport version 2 は
 32-bit session ID を wire format に持ち、片側の reset 後に古い ACK を無視して
 receive sequence を再同期します。
 
@@ -202,7 +205,7 @@ transport は UART / RTU receive buffer に残った以前の boot session の p
 | `MODBUS_MAX_QUEUED_CHUNKS` | `256` | in-flight と pending を合わせた outgoing chunk 数上限 |
 | `MODBUS_POLL_INTERVAL_MS` | `1000` / `20` | Phase 1 / Phase 2 polling interval |
 | `MODBUS_TRACE_TRANSACTIONS` | unset | `1` / `true` で non-idle transaction と全 failure の size、latency、累積成否を記録 |
-| `MODBUS_START_DELAY_MS` | `0` | recovery test 用の起動 delay |
+| `MODBUS_START_DELAY_MS` | `0` / `3000` | Phase 1 と Server / Phase 2 Client の startup delay |
 | `ATOMVM_NODE_ALIAS` | role から `a` / `b` | local node alias |
 | `ATOMVM_PEER_ALIAS` | role から `b` / `a` | peer node alias |
 | `ATOMVM_COOKIE` | `AtomVM` | distribution cookie |
@@ -213,6 +216,10 @@ transport は UART / RTU receive buffer に残った以前の boot session の p
 
 これらは `Application.compile_env/3` で application に埋め込まれます。値を変更する
 ときは `mix clean` して、同じ environment で pack / flash してください。
+
+Phase 2 Client の 3 秒 delay は、両 board を同時に給電したときの決定論的な起動順序を作る mitigation です。
+Client を Server より3秒以上先に起動する構成や、runtimeのhalf-open distribution connectionを一般に復旧する保証では
+ありません。調査時だけ無効化する場合はClientを`MODBUS_START_DELAY_MS=0`でbuildします。
 
 96-byte の operating chunk を超える genuine distribution message を検証する場合は、両 node を同じ
 `DISTERL_PAYLOAD_BYTES` と `MODBUS_CHUNK_PAYLOAD_BYTES` で build します。低 baud rate では

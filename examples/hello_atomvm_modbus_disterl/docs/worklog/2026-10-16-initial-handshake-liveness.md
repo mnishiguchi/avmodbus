@@ -1,0 +1,64 @@
+# Initial-handshake liveness と起動順序mitigation — 2026-10-16
+
+## 目的
+
+4 KiB active-transfer recoveryの準備中に再現した、initial handshake中のsession change後にconnection retryが
+進まない問題を調査する。transportだけの修正で安全に復旧できるか確認し、できない場合は再現条件を狭める
+mitigationと残るblockerを明確にする。
+
+## AtomVM sourceの調査
+
+対象はboardで使用中のAtomVM `v0.7.0-beta.0+git.8d3e051`である。同commitの`net_kernel.erl`と
+`serial_dist.erl`を確認した。
+
+最初のremote sendで`net_kernel`が`ProtoDist:setup/5`を呼ぶと、connection mapには
+`{pending, undefined, DHandle}`が入る。handshake processが`dist_util`から`mark_pending/4`を呼んだ後はPIDが入るが、
+それ以前にsetup processが終了した場合、`'EXIT'` handlerは`undefined`と終了PIDを一致させられずentryを除去しない。
+後続のconnect requestは既存pending entryの`DHandle`だけを更新し、新しい`ProtoDist:setup/5`を呼ばない。
+
+このsource pathは、application ping retryだけが続き、新しいhandshake writeが始まらなかった実機logと整合する。
+ただしexampleのhost testはAtomVM `net_kernel` processを動かしていないため、これはsource inspectionと実機logに基づく
+原因候補であり、AtomVM unit testによる確定ではない。
+
+## 棄却したsetup retry wrapper
+
+`:serial_dist`の全callbackをdelegateし、outgoing setup processの早期終了だけをmonitorして再実行する薄いwrapperを
+試作した。hostではearly failure後のretry policyをtestでき、43 testsが成功し、PackBEAMも完了した。
+
+しかし約1.5秒Client先行で実機試験すると、Clientのhandshakeは`net_kernel`への`mark_nodeup` callで5秒timeoutに
+なった。
+
+```text
+exit: {timeout,{gen_server,call,[...,{mark_nodeup,b@modbus.local,...},5000]}}
+```
+
+Server側にはhalf-open connectionが残り、約75秒後に`net_tick_timeout`になった。setupだけを再実行してもpeer側の
+busy link managerとhalf-open distribution stateを原子的に解放できないため、安全なexample-local recoveryではないと
+判断し、wrapperのcode、test、設定をすべて撤回した。
+
+## 採用したmitigation
+
+Phase 2 Clientのdefault `MODBUS_START_DELAY_MS`を3,000 msとし、`net_kernel`とModbus UARTをServerより後に開始する。
+ServerとPhase 1のdefaultは0 msである。delayはdistribution setup timer開始前に適用される。
+
+同じ2台のXIAO ESP32-C5を使い、`tio` scriptでClientを先にresetし、約1.5秒後にServerをresetするrunを2回行った。
+
+| run | first pong RTT | steady RTT | ping/pong | pong timeout |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 4,325 ms | 1,441 / 1,442 ms | 3 / 3 | 0 |
+| 2 | 4,330 ms | 1,443 / 1,442 ms | 3 / 3 | 0 |
+
+両runでClientはresetから3秒後にvirtual UARTをopenし、その時点ではServerが既にreadyだった。genuine distribution
+handshake、remote process messaging、接続後のmulti-chunk writeはすべて完了した。
+
+最終firmwareを両boardへflashした後、ready済みServerに対してClientだけをresetするregressionも行った。ping/pongは
+3 / 3、RTTは3,560 / 1,440 / 1,442 ms、pong timeoutは0で完了した。
+
+## 結論
+
+3秒delayは同時給電と今回の約1.5秒Client先行条件を安定したServer-first orderingへ変えるmitigationとして採用する。
+これはAtomVMのpending connection cleanupを修正せず、Clientが3秒以上先行する条件や任意のhalf-open failureからの
+recoveryを保証しない。
+
+根本対応にはAtomVM側で、setup processがpeerへ関連付く前に終了した場合のpending entry cleanupと、両endpointの
+link managerを含むretry lifecycleを検証する必要がある。exampleはその修正をvendorせず、`:serial_dist`を直接再利用する。
