@@ -11,13 +11,14 @@
   `serial_dist` 再接続は host test と実機で確認済みです。
 - AtomVM `net_kernel` の distribution setup timeout は 7 秒固定です。9,600 baud の検証構成では成功しましたが、
   poll interval、baud、bus error に対する余裕は小さいです。
-- `serial_dist` の最大 frame は Modbus chunk より大きいため adapter が 232-byte chunk に分割しますが、
-  検証済みなのは 64 KiB byte stream の host stress test までです。大きな genuine distribution payload の
-  実機 round trip は未達です。512-byte payload は Server で受信・検証できましたが、echo response の
-  full-size chunk が Client の 500 ms Modbus deadline を超え、最終的に `net_tick_timeout` になりました。
-- 4 KiB payload の 9,600-baud 実機試験も `net_tick_timeout` になりました。115,200 baud では今回の
-  HW-519 構成で distribution handshake が安定せず、baud rate の変更だけでは解決しませんでした。
-- 実測した steady-state ping/pong RTT は約 0.8 秒で、direct UART より大幅に遅くなります。
+- wire protocol は 232-byte payload を許容しますが、今回の XIAO / HW-519 構成では上限付近の RTU frame が
+  安定しませんでした。virtual UART は 96-byte operating chunk（RTU frame 114 bytes）を default とし、
+  512-byte genuine distribution payload の双方向 round trip を実機確認済みです。
+- 4 KiB payload の 9,600-baud 実機試験は旧 232-byte chunk 構成で `net_tick_timeout` になりました。96-byte chunk
+  では未再試験です。115,200 baud では今回の HW-519 構成で distribution handshake が安定せず、baud rate の
+  変更だけでは解決しませんでした。
+- zero-byte の steady-state ping/pong RTT は約 0.8 秒、512-byte payload は 7.889 秒で、direct UART より
+  大幅に遅くなります。
 - Elixir `GenServer` が生成する未実装 callback の fallback は AtomVM 0.7.0-beta.0 にない
   `erlang:phash2/2` を呼びます。このサンプルは該当する `handle_call/3` と `handle_cast/2` を明示して
   `bad_call` または `bad_cast` の stop tuple を返すため、PackBEAM warning と unsupported failure path を除去しています。

@@ -12,6 +12,10 @@ Function Code `100` (`0x64`) だけを利用します。
 - Phase 2: `net_kernel` / `dist_util` / `serial_dist` の genuine distribution handshake
 - remote process への ping / pong を 3 回実行（RTT: 2671 ms、802 ms、802 ms）
 
+2026-10-16 の follow-up では、96-byte operating chunk と adaptive response timeout を使い、512-byte payload の
+genuine distribution ping/pong を双方向に完了しました（RTT: 7889 ms）。詳細は
+[bidirectional multi-chunk round trip](docs/worklog/2026-10-16-bidirectional-multichunk.md) を参照してください。
+
 アーキテクチャ、制限、設計判断の一覧は [docs/README.md](docs/README.md)、詳細な実機ログと観察結果は
 [2026-10-15-hardware-verification.md](docs/worklog/2026-10-15-hardware-verification.md) にあります。
 
@@ -158,6 +162,8 @@ message は registered process `:modbus_disterl_demo` 宛に Erlang distribution
 | `ATOMVM_UART_RX_PIN` | `24` | RX GPIO |
 | `MODBUS_UNIT_ID` | `1` | Server unit ID |
 | `MODBUS_RESPONSE_TIMEOUT_MS` | `1000` / `500` | Phase 1 / Phase 2 transaction timeout |
+| `MODBUS_BULK_RESPONSE_TIMEOUT_MS` | `2000` | multi-chunk write 後の transaction timeout |
+| `MODBUS_CHUNK_PAYLOAD_BYTES` | `96` | virtual UART の operating chunk size（protocol 上限は 232） |
 | `MODBUS_POLL_INTERVAL_MS` | `1000` / `20` | Phase 1 / Phase 2 polling interval |
 | `MODBUS_TRACE_TRANSACTIONS` | unset | `1` / `true` で non-idle transaction と全 failure の size、latency、累積成否を記録 |
 | `MODBUS_START_DELAY_MS` | `0` | recovery test 用の起動 delay |
@@ -172,10 +178,11 @@ message は registered process `:modbus_disterl_demo` 宛に Erlang distribution
 これらは `Application.compile_env/3` で application に埋め込まれます。値を変更する
 ときは `mix clean` して、同じ environment で pack / flash してください。
 
-232-byte の Modbus chunk 上限を超える genuine distribution message を検証する場合は、両 node を同じ
-`DISTERL_PAYLOAD_BYTES` で build します。低 baud rate では `DISTERL_PONG_TIMEOUT_MS` も十分に延ばしてください。
-現在確認されている multi-chunk 実機試験の制約は
-[large distribution payload の作業記録](docs/worklog/2026-10-16-large-distribution-payload.md) を参照してください。
+96-byte の operating chunk を超える genuine distribution message を検証する場合は、両 node を同じ
+`DISTERL_PAYLOAD_BYTES` と `MODBUS_CHUNK_PAYLOAD_BYTES` で build します。低 baud rate では
+`DISTERL_PONG_TIMEOUT_MS` も十分に延ばしてください。232 bytes は wire protocol の上限ですが、今回の XIAO / HW-519
+構成では上限付近の RTU frame が安定しないため default にはしません。実測結果は
+[bidirectional multi-chunk round trip](docs/worklog/2026-10-16-bidirectional-multichunk.md) を参照してください。
 
 ## References
 

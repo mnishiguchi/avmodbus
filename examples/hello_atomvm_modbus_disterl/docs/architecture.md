@@ -25,7 +25,9 @@ Node B sends queued data only in a response to a poll.
   acknowledged_session:32, acknowledgment:16, payload::binary>>
 ```
 
-- payload は 1 chunk 最大 232 bytes（header と合わせて version 1 と同じ 245 bytes）
+- wire protocol の payload は 1 chunk 最大 232 bytes（header と合わせて version 1 と同じ 245 bytes）
+- virtual UART の default operating chunk は 96 bytes で、FC-100 header、PDU、RTU framing を含む request / response を
+  114 bytes に抑える。`MODBUS_CHUNK_PAYLOAD_BYTES` で 1..232 の範囲を指定できる
 - 各方向で 1 chunk を in-flight にし、それ以降は FIFO に保持する
 - ACK されるまで同じ sequence と payload を再送する
 - 受信済み sequence の再送は配達せず、ACK だけを再送する
@@ -47,6 +49,10 @@ Node B sends queued data only in a response to a poll.
 remote ping/pong は application 独自の protocol ではなく genuine Erlang distribution 上を通ります。
 `DISTERL_PAYLOAD_BYTES` を設定すると deterministic binary を ping に含め、Server が内容を検証して echo し、
 Client が同じ binary を再検証します。
+
+Client は handshake 中に 500 ms の response timeout を使います。`serial_dist` が operating chunk を超える write を
+queue した後は 2000 ms の bulk timeout に切り替え、peer session が変わると 500 ms に戻します。これにより
+AtomVM の 7 秒 handshake budget を維持しながら、接続後の multi-chunk traffic に余裕を与えます。
 
 `MODBUS_TRACE_TRANSACTIONS=1` では Client の non-idle physical transaction と全 failure について request /
 response byte 数、経過時間、poll 番号、最大 latency、累積 success / failure 数を出力します。13-byte の

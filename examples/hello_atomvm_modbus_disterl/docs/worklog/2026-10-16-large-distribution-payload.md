@@ -69,3 +69,6 @@ HW-519 を power-cycle して baseline を再確認してから測定を再開�
 2. request size、response size、成功数、timeout 数、transaction latency を計測可能にする
 3. handshake の 7 秒 budget を維持しながら full-size response に十分な deadline を与える方法を検討する
 4. 512 bytes、1 KiB、4 KiB の順で bidirectional round trip を再試験する
+
+512-byte round trip は後の試験で 96-byte operating chunk を使って完了した。調査と実測値は
+[Bidirectional multi-chunk round trip](2026-10-16-bidirectional-multichunk.md) を参照する。1 KiB と 4 KiB は未再試験である。

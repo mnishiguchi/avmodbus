@@ -10,7 +10,7 @@ defmodule DisterlProbe.ModbusUART do
   use GenServer
 
   alias AVModbus.{Client, Server}
-  alias DisterlProbe.{Channel, Protocol, TransactionStats}
+  alias DisterlProbe.{Channel, Protocol, ResponseTimeout, TransactionStats}
 
   @function_code 100
   @max_payload Protocol.max_payload()
@@ -39,16 +39,23 @@ defmodule DisterlProbe.ModbusUART do
       do: GenServer.call(pid, {:read, timeout}, :infinity)
 
   @doc false
-  def queue_chunks(channel, <<>>), do: {:ok, channel}
+  def queue_chunks(channel, data), do: queue_chunks(channel, data, @max_payload)
 
-  def queue_chunks(channel, data) when byte_size(data) <= @max_payload,
-    do: Channel.queue(channel, data)
+  def queue_chunks(channel, <<>>, chunk_payload_bytes)
+      when is_integer(chunk_payload_bytes) and chunk_payload_bytes in 1..@max_payload,
+      do: {:ok, channel}
 
-  def queue_chunks(channel, data) do
-    <<chunk::binary-size(@max_payload), rest::binary>> = data
+  def queue_chunks(channel, data, chunk_payload_bytes)
+      when is_integer(chunk_payload_bytes) and chunk_payload_bytes in 1..@max_payload and
+             byte_size(data) <= chunk_payload_bytes,
+      do: Channel.queue(channel, data)
+
+  def queue_chunks(channel, data, chunk_payload_bytes)
+      when is_integer(chunk_payload_bytes) and chunk_payload_bytes in 1..@max_payload do
+    <<chunk::binary-size(chunk_payload_bytes), rest::binary>> = data
 
     with {:ok, next} <- Channel.queue(channel, chunk) do
-      queue_chunks(next, rest)
+      queue_chunks(next, rest, chunk_payload_bytes)
     end
   end
 
@@ -71,7 +78,12 @@ defmodule DisterlProbe.ModbusUART do
       reader: nil,
       resource: nil,
       unit_id: Keyword.fetch!(options, :unit_id),
-      timeout_ms: Keyword.fetch!(options, :timeout_ms),
+      response_timeout:
+        ResponseTimeout.new(
+          Keyword.fetch!(options, :timeout_ms),
+          Keyword.fetch!(options, :bulk_timeout_ms)
+        ),
+      chunk_payload_bytes: Keyword.fetch!(options, :chunk_payload_bytes),
       poll_ms: Keyword.fetch!(options, :poll_ms),
       request_ref: nil,
       stats: TransactionStats.new(Keyword.get(options, :trace_transactions, false))
@@ -92,9 +104,20 @@ defmodule DisterlProbe.ModbusUART do
   def handle_call({:write, data}, _from, state) do
     log_stream_data("queued", data)
 
-    case queue_chunks(state.channel, data) do
-      {:ok, channel} -> {:reply, :ok, %{state | channel: channel}}
-      {:error, _reason} = error -> {:reply, error, state}
+    case queue_chunks(state.channel, data, state.chunk_payload_bytes) do
+      {:ok, channel} ->
+        response_timeout =
+          ResponseTimeout.observe_write(
+            state.response_timeout,
+            byte_size(data),
+            state.chunk_payload_bytes
+          )
+
+        log_timeout_change(state.response_timeout, response_timeout, byte_size(data))
+        {:reply, :ok, %{state | channel: channel, response_timeout: response_timeout}}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
     end
   end
 
@@ -184,7 +207,11 @@ defmodule DisterlProbe.ModbusUART do
   def terminate(_reason, _state), do: :ok
 
   defp open_transport(:client, serial, state) do
-    Client.start_link(transport: :rtu, serial: serial, timeout: state.timeout_ms)
+    Client.start_link(
+      transport: :rtu,
+      serial: serial,
+      timeout: ResponseTimeout.current(state.response_timeout)
+    )
   end
 
   defp open_transport(:server, serial, state) do
@@ -198,7 +225,7 @@ defmodule DisterlProbe.ModbusUART do
            state.resource,
            state.unit_id,
            {:custom, @function_code, request},
-           timeout: state.timeout_ms,
+           timeout: ResponseTimeout.current(state.response_timeout),
            to: self()
          ) do
       reference when is_reference(reference) ->
@@ -250,12 +277,12 @@ defmodule DisterlProbe.ModbusUART do
     if timer != nil, do: Process.cancel_timer(timer)
     GenServer.reply(from, {:error, :closed})
     log_peer_restart(state.channel.peer_session, incoming_session)
-    %{state | reader: nil, rx_buffer: <<>>}
+    reset_stream(state, nil)
   end
 
   defp reset_restarted_peer(state, incoming_session) do
     log_peer_restart(state.channel.peer_session, incoming_session)
-    %{state | rx_buffer: <<>>}
+    reset_stream(state, state.reader)
   end
 
   defp deliver(state, channel, nil), do: %{state | channel: channel}
@@ -283,12 +310,32 @@ defmodule DisterlProbe.ModbusUART do
     %{state | reader: nil}
   end
 
+  defp reset_stream(state, reader) do
+    %{
+      state
+      | reader: reader,
+        rx_buffer: <<>>,
+        response_timeout: ResponseTimeout.reset(state.response_timeout)
+    }
+  end
+
   defp schedule_poll(delay), do: Process.send_after(self(), :poll, delay)
 
   defp now_ms, do: :erlang.monotonic_time(:millisecond)
 
   defp log_peer_restart(previous, current) do
     IO.puts("modbus_uart: peer session changed #{previous} -> #{current}; resetting stream")
+  end
+
+  defp log_timeout_change(previous, current, write_size) do
+    previous_ms = ResponseTimeout.current(previous)
+    current_ms = ResponseTimeout.current(current)
+
+    if previous_ms != current_ms do
+      IO.puts(
+        "modbus_uart: response timeout #{previous_ms} -> #{current_ms} ms after multi-chunk write bytes=#{write_size}"
+      )
+    end
   end
 
   # serial_dist emits 2-byte sync markers before connection and 10-byte tick

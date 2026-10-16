@@ -10,9 +10,14 @@ end
 mode = if System.get_env("MODBUS_EXPERIMENT") == "disterl", do: :disterl, else: :transport
 role = if System.get_env("MODBUS_ROLE") == "server", do: :server, else: :client
 ping_payload_bytes = parse_integer.("DISTERL_PAYLOAD_BYTES", 0)
+chunk_payload_bytes = parse_integer.("MODBUS_CHUNK_PAYLOAD_BYTES", 96)
 
 if ping_payload_bytes < 0 do
   raise ArgumentError, "DISTERL_PAYLOAD_BYTES must be a non-negative integer"
+end
+
+if chunk_payload_bytes < 1 or chunk_payload_bytes > 232 do
+  raise ArgumentError, "MODBUS_CHUNK_PAYLOAD_BYTES must be between 1 and 232"
 end
 
 serial = [
@@ -47,6 +52,8 @@ config :disterl_probe,
   start_delay_ms: parse_integer.("MODBUS_START_DELAY_MS", 0),
   timeout_ms:
     parse_integer.("MODBUS_RESPONSE_TIMEOUT_MS", if(mode == :disterl, do: 500, else: 1_000)),
+  bulk_timeout_ms: parse_integer.("MODBUS_BULK_RESPONSE_TIMEOUT_MS", 2_000),
+  chunk_payload_bytes: chunk_payload_bytes,
   poll_ms: parse_integer.("MODBUS_POLL_INTERVAL_MS", if(mode == :disterl, do: 20, else: 1_000)),
   trace_transactions: System.get_env("MODBUS_TRACE_TRANSACTIONS") in ["1", "true"],
   node_alias: System.get_env("ATOMVM_NODE_ALIAS") || if(role == :server, do: "b", else: "a"),

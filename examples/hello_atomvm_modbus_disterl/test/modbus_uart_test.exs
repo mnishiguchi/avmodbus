@@ -25,6 +25,20 @@ defmodule DisterlProbe.ModbusUARTTest do
     assert ModbusUART.queue_chunks(channel, <<>>) == {:ok, channel}
   end
 
+  test "uses a configured payload size below the wire protocol maximum" do
+    payload = :binary.copy(<<0xA5>>, 300)
+    assert {:ok, channel} = ModbusUART.queue_chunks(Channel.new(300), payload, 96)
+
+    assert {1, first} = channel.outgoing
+    assert byte_size(first) == 96
+
+    assert Enum.map(channel.pending, fn {_sequence, chunk} -> byte_size(chunk) end) == [
+             96,
+             96,
+             12
+           ]
+  end
+
   defp transfer(sender, receiver, reassembled, chunks, retries) do
     {:ok, request} = packet(sender)
     {:ok, receiver, delivered} = Channel.receive_packet(receiver, request)

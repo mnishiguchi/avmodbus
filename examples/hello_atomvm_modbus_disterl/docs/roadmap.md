@@ -28,7 +28,7 @@
 - [x] Modbus transaction size、latency、累積 success / failure の opt-in tracing を追加する
 - [x] PackBEAM の `erlang:phash2/2` warning の発生箇所を特定し、unsupported failure path を除去する
 - [x] response 消失、CRC error、連続 timeout 後の復旧を host fault injection で検証する
-- [ ] full-size response timeout を解決し、multi-chunk payload の bidirectional round trip を実機で確認する
+- [x] 232-byte 上限付近の不安定性を回避し、512-byte multi-chunk payload の bidirectional round trip を実機で確認する
 - [ ] baud rate と poll interval ごとの handshake 時間、RTT、timeout の安全域を測定する
 - [ ] 長時間接続で tick frame と application traffic が安定して共存することを確認する
 

@@ -9,6 +9,8 @@ defmodule DisterlProbe.Distributed do
   @serial Application.compile_env(:disterl_probe, :serial, [])
   @unit_id Application.compile_env(:disterl_probe, :unit_id, 1)
   @timeout_ms Application.compile_env(:disterl_probe, :timeout_ms, 500)
+  @bulk_timeout_ms Application.compile_env(:disterl_probe, :bulk_timeout_ms, 2_000)
+  @chunk_payload_bytes Application.compile_env(:disterl_probe, :chunk_payload_bytes, 96)
   @poll_ms Application.compile_env(:disterl_probe, :poll_ms, 20)
   @trace_transactions Application.compile_env(:disterl_probe, :trace_transactions, false)
   @node_alias Application.compile_env(:disterl_probe, :node_alias, "a")
@@ -50,6 +52,8 @@ defmodule DisterlProbe.Distributed do
           serial: @serial,
           unit_id: @unit_id,
           timeout_ms: @timeout_ms,
+          bulk_timeout_ms: @bulk_timeout_ms,
+          chunk_payload_bytes: @chunk_payload_bytes,
           poll_ms: @poll_ms,
           trace_transactions: @trace_transactions
         ],
