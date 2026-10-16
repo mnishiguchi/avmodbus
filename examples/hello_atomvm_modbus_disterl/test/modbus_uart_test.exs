@@ -1,7 +1,9 @@
 defmodule DisterlProbe.ModbusUARTTest do
   use ExUnit.Case, async: true
 
-  alias DisterlProbe.{Channel, ModbusUART, Protocol}
+  import ExUnit.CaptureIO
+
+  alias DisterlProbe.{Channel, ModbusUART, Protocol, ResponseTimeout}
 
   test "chunks and reassembles a 64 KiB stream despite repeated lost responses" do
     pattern = for byte <- 0..255, into: <<>>, do: <<byte>>
@@ -63,6 +65,45 @@ defmodule DisterlProbe.ModbusUARTTest do
     assert Channel.queue(channel, <<0>>) == {:error, :queue_full}
   end
 
+  test "a successful multi-chunk write switches to the bulk response timeout" do
+    payload = :binary.copy(<<0xA5>>, 192)
+    state = adapter_state(Channel.new(max_queued_bytes: 1_024, max_queued_chunks: 16))
+
+    assert {:reply, :ok, next} = callback({:write, payload}, state)
+    assert next.channel.queued_bytes == 192
+    assert next.channel.outstanding == 2
+    assert ResponseTimeout.current(next.response_timeout) == 2_000
+    assert next.trace_queue_active
+  end
+
+  test "a queue-full write rolls the session and resets the receive stream" do
+    {:ok, channel} =
+      Channel.new(max_queued_bytes: 191, max_queued_chunks: 16)
+      |> Channel.queue(:binary.copy(<<0x11>>, 96))
+
+    old_session = channel.session
+
+    state =
+      channel
+      |> adapter_state()
+      |> Map.put(:rx_buffer, "stale receive stream")
+      |> Map.put(:trace_queue_active, true)
+      |> Map.update!(:response_timeout, &ResponseTimeout.observe_write(&1, 192, 96))
+
+    assert {:reply, {:error, :queue_full}, next} =
+             callback({:write, :binary.copy(<<0x22>>, 192)}, state)
+
+    refute next.channel.session == old_session
+    assert next.channel.peer_session == nil
+    assert next.channel.max_queued_bytes == 191
+    assert next.channel.max_queued_chunks == 16
+    assert Channel.done?(next.channel)
+    assert next.channel.queued_bytes == 0
+    assert next.rx_buffer == <<>>
+    assert ResponseTimeout.current(next.response_timeout) == 500
+    refute next.trace_queue_active
+  end
+
   defp transfer(sender, receiver, reassembled, chunks, retries) do
     {:ok, request} = packet(sender)
     {:ok, receiver, delivered} = Channel.receive_packet(receiver, request)
@@ -91,5 +132,28 @@ defmodule DisterlProbe.ModbusUARTTest do
 
   defp packet(channel) do
     with {:ok, binary} <- Channel.packet(channel), do: Protocol.decode(binary)
+  end
+
+  defp adapter_state(channel) do
+    %{
+      channel: channel,
+      chunk_payload_bytes: 96,
+      reader: nil,
+      response_timeout: ResponseTimeout.new(500, 2_000),
+      rx_buffer: <<>>,
+      trace_queue: false,
+      trace_queue_active: false
+    }
+  end
+
+  defp callback(message, state) do
+    caller = self()
+
+    capture_io(fn ->
+      send(caller, {:callback_result, ModbusUART.handle_call(message, :unused_from, state)})
+    end)
+
+    assert_receive {:callback_result, result}
+    result
   end
 end

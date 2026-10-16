@@ -43,6 +43,7 @@
 - [x] ACK-loss 下の queue / free heap と 8 KiB queue-full を実機測定する
 - [x] queue-full時にsessionをrolloverし、peer controller終了後のhandshakeとping/pong復旧を実機確認する
 - [x] queue-full後のsession rollover、peer boundary伝播、新streamの双方向配送を一連のhost testで固定する
+- [x] `ModbusUART.write` のqueue-full時にsession、receive buffer、timeoutが同時にresetされることをhost testで固定する
 - [x] 2-node proof of concept では virtual UART adapter を維持し、専用 `modbus_dist` carrier は実装しないと判断する
   （[ADR 0003](adr/0003-adapt-serial-dist-with-a-virtual-uart.md)）
 
