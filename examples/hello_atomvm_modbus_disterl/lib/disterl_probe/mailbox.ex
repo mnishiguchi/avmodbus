@@ -43,4 +43,9 @@ defmodule DisterlProbe.Mailbox do
         {:reply, {:error, {:exception, :illegal_data_value}}, state}
     end
   end
+
+  # Elixir's generated fallback calls erlang:phash2/2, which AtomVM 0.7.0-beta.0
+  # does not provide. Preserve the intended failure without that unsupported BIF.
+  @impl true
+  def handle_cast(message, state), do: {:stop, {:bad_cast, message}, state}
 end

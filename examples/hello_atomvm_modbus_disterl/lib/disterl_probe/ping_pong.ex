@@ -34,6 +34,14 @@ defmodule DisterlProbe.PingPong do
      }}
   end
 
+  # Elixir's generated fallbacks call erlang:phash2/2, which AtomVM
+  # 0.7.0-beta.0 does not provide. Stop explicitly on unsupported messages.
+  @impl true
+  def handle_call(message, _from, state), do: {:stop, {:bad_call, message}, state}
+
+  @impl true
+  def handle_cast(message, state), do: {:stop, {:bad_cast, message}, state}
+
   @impl true
   def handle_info(:send_ping, %{remaining: 0} = state), do: {:noreply, state}
 

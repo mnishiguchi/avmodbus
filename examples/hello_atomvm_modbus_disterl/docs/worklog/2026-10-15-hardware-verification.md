@@ -130,7 +130,9 @@ remainder of the 45-second observation without a crash or UART error.
 - AtomVM's fixed 7-second distribution setup timer and Modbus's request/response latency are the
   main timing constraint. The verified 20 ms poll interval completed the handshake in time.
 - PackBEAM reported `erlang:phash2/2` in generated Elixir `GenServer` error-reporting code. The
-  verified normal paths did not enter that unsupported code, but it remains a build-time warning.
+  verified normal paths did not enter that unsupported code. A follow-up replaced the generated
+  fallback callbacks and removed the warning; see
+  [PackBEAM `phash2/2` warning の除去](2026-10-16-packbeam-phash2.md).
 
 The session and independent-reboot limitation recorded here was addressed in a follow-up experiment.
 See [Session-aware reboot recovery — 2026-10-16](2026-10-16-session-recovery.md).

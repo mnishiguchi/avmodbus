@@ -12,7 +12,8 @@ Server は size と内容を検証して同じ binary を pong で返し、Clien
 default は従来と同じ 0 bytes である。
 
 payload pattern の exact size、determinism、破損検出を host test に追加した。example 全体では 21 tests が
-成功し、PackBEAM も既知の `erlang:phash2/2` warning だけで完了した。
+成功し、PackBEAM は当時既知だった `erlang:phash2/2` warning だけで完了した。この warning は後の
+[調査と callback の明示実装](2026-10-16-packbeam-phash2.md) で除去した。
 
 ## 4 KiB、9,600 baud
 

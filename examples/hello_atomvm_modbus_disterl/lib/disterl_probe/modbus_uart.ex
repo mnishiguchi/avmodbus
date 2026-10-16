@@ -121,6 +121,11 @@ defmodule DisterlProbe.ModbusUART do
     end
   end
 
+  # Elixir's generated fallback calls erlang:phash2/2, which AtomVM 0.7.0-beta.0
+  # does not provide. Preserve the intended failure without that unsupported BIF.
+  @impl true
+  def handle_cast(message, state), do: {:stop, {:bad_cast, message}, state}
+
   @impl true
   def handle_info(:poll, %{role: :client, request_ref: nil} = state) do
     case Channel.packet(state.channel) do

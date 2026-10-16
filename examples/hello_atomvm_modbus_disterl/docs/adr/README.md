@@ -19,3 +19,4 @@
 - [0002: FC 100 上に stop-and-wait transport を構成する](0002-use-fc100-stop-and-wait-transport.md)
 - [0003: virtual UART で serial_dist を再利用する](0003-adapt-serial-dist-with-a-virtual-uart.md)
 - [0004: session ID で片側再起動後の transport を再同期する](0004-resynchronize-with-session-ids.md)
+- [0005: GenServer の unsupported fallback callback を置き換える](0005-replace-unsupported-gen-server-fallbacks.md)

@@ -18,8 +18,9 @@
 - 4 KiB payload の 9,600-baud 実機試験も `net_tick_timeout` になりました。115,200 baud では今回の
   HW-519 構成で distribution handshake が安定せず、baud rate の変更だけでは解決しませんでした。
 - 実測した steady-state ping/pong RTT は約 0.8 秒で、direct UART より大幅に遅くなります。
-- PackBEAM checker は Elixir `GenServer` が生成する error-reporting path に含まれる
-  `erlang:phash2/2` を警告します。検証した normal path は両方の実機で動作しました。
+- Elixir `GenServer` が生成する未実装 callback の fallback は AtomVM 0.7.0-beta.0 にない
+  `erlang:phash2/2` を呼びます。このサンプルは該当する `handle_call/3` と `handle_cast/2` を明示して
+  `bad_call` または `bad_cast` の stop tuple を返すため、PackBEAM warning と unsupported failure path を除去しています。
 - peer reboot を検出して古い `serial_dist` reader を終了すると、AtomVM は意図した
   `{serial_read_error, closed}` の process crash report を console に表示します。
 - production-ready carrier、multidrop、routing、discovery、性能最適化は対象外です。
