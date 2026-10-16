@@ -32,10 +32,11 @@
 - [x] 30 回の 512-byte ping/pong soak test で tick frame と application traffic の共存を実機確認する
 - [x] 両 node の同時 reset で発生した stale frame の startup race を host test で再現し、実機で収束を確認する
 - [x] baud rate と poll interval ごとの handshake upper bound、RTT、setup timeout 境界を実機測定する
+- [x] 2-node proof of concept では virtual UART adapter を維持し、専用 `modbus_dist` carrier は実装しないと判断する
+  （[ADR 0003](adr/0003-adapt-serial-dist-with-a-virtual-uart.md)）
 
 ## 調査後に判断すること
 
-- [ ] virtual UART adapter を維持するか、専用 `modbus_dist` carrier が必要か判断する
 - [ ] 再利用できる部分を AVModbus の一般 API に移す価値があるか判断する
 - [ ] example のまま保守するか、独立した experimental project として分離するか判断する
 
