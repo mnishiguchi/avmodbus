@@ -1,0 +1,71 @@
+defmodule DisterlProbe.ModbusUARTTest do
+  use ExUnit.Case, async: true
+
+  alias DisterlProbe.{Channel, ModbusUART, Protocol}
+
+  test "chunks and reassembles a 64 KiB stream despite repeated lost responses" do
+    pattern = for byte <- 0..255, into: <<>>, do: <<byte>>
+    payload = :binary.copy(pattern, 256)
+    expected_chunks = div(byte_size(payload) + Protocol.max_payload() - 1, Protocol.max_payload())
+
+    {:ok, sender} = ModbusUART.queue_chunks(Channel.new(100), payload)
+
+    {sender, receiver, reassembled, chunks, retries} =
+      transfer(sender, Channel.new(200), <<>>, 0, 0)
+
+    assert Channel.done?(sender)
+    assert receiver.received == expected_chunks
+    assert chunks == expected_chunks
+    assert retries == div(expected_chunks, 7)
+    assert reassembled == payload
+  end
+
+  test "an empty write queues no transport message" do
+    channel = Channel.new()
+    assert ModbusUART.queue_chunks(channel, <<>>) == {:ok, channel}
+  end
+
+  test "uses a configured payload size below the wire protocol maximum" do
+    payload = :binary.copy(<<0xA5>>, 300)
+    assert {:ok, channel} = ModbusUART.queue_chunks(Channel.new(300), payload, 96)
+
+    assert {1, first} = channel.outgoing
+    assert byte_size(first) == 96
+
+    assert Enum.map(channel.pending, fn {_sequence, chunk} -> byte_size(chunk) end) == [
+             96,
+             96,
+             12
+           ]
+  end
+
+  defp transfer(sender, receiver, reassembled, chunks, retries) do
+    {:ok, request} = packet(sender)
+    {:ok, receiver, delivered} = Channel.receive_packet(receiver, request)
+    reassembled = reassembled <> delivered
+    chunks = chunks + 1
+
+    {receiver, retries} =
+      if rem(chunks, 7) == 0 do
+        # Model a response that was lost after the server accepted the request.
+        # The client retransmits the same packet, which must not be delivered twice.
+        assert {:ok, duplicate_receiver, nil} = Channel.receive_packet(receiver, request)
+        {duplicate_receiver, retries + 1}
+      else
+        {receiver, retries}
+      end
+
+    {:ok, acknowledgment} = packet(receiver)
+    {:ok, sender, nil} = Channel.receive_packet(sender, acknowledgment)
+
+    if Channel.done?(sender) do
+      {sender, receiver, reassembled, chunks, retries}
+    else
+      transfer(sender, receiver, reassembled, chunks, retries)
+    end
+  end
+
+  defp packet(channel) do
+    with {:ok, binary} <- Channel.packet(channel), do: Protocol.decode(binary)
+  end
+end

@@ -20,6 +20,17 @@ AVModbus のドキュメントは、利用者向けの説明、開発者向け�
 `development/` には、実機試験、リソース計測、障害調査、リリース確認などの再現可能な記録を置きます。
 現在の利用方法は利用者向け資料を正とし、調査の経緯や過去の測定値は `development/` に残します。
 
+## 実験
+
+- [Modbus RTU 上の distributed Erlang](../examples/hello_atomvm_modbus_disterl/README.md) —
+  custom Function Code `100` を carrier として使う standalone example
+- [実験用ドキュメント](../examples/hello_atomvm_modbus_disterl/docs/README.md) —
+  アーキテクチャ、制約、ロードマップ、ADR、実機 worklog
+
+この実験では genuine distributed Erlang の動作を実機確認していますが、carrier と
+virtual UART adapter は AVModbus の public API ではありません。実験の lifecycle と記録は
+サンプル配下で管理します。
+
 ## 更新方針
 
 - 本文は日本語を基本とし、API 名、プロトコル名、正式な技術用語は必要以上に翻訳しません。

@@ -53,6 +53,32 @@ jobs:
           MIX_ENV=prod mix clean
           MIX_ENV=prod mix atomvm.size
 
+      - name: Fetch Modbus distributed Erlang example dependencies
+        working-directory: examples/hello_atomvm_modbus_disterl
+        run: mix deps.get
+
+      - name: Test Modbus distributed Erlang example
+        working-directory: examples/hello_atomvm_modbus_disterl
+        run: |
+          mix format --check-formatted
+          mix test
+
+      - name: Check Phase 1 client and server builds
+        working-directory: examples/hello_atomvm_modbus_disterl
+        run: |
+          for role in client server; do
+            MIX_ENV=prod mix clean
+            MODBUS_ROLE="$role" MIX_ENV=prod mix atomvm.check
+          done
+
+      - name: Check distributed Erlang client and server builds
+        working-directory: examples/hello_atomvm_modbus_disterl
+        run: |
+          for role in client server; do
+            MIX_ENV=prod mix clean
+            MODBUS_EXPERIMENT=disterl MODBUS_ROLE="$role" MIX_ENV=prod mix atomvm.check
+          done
+
   interoperability:
     runs-on: ubuntu-24.04
 
