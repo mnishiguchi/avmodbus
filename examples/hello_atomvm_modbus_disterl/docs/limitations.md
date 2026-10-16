@@ -16,8 +16,9 @@
   安定しませんでした。virtual UART は 96-byte operating chunk（RTU frame 114 bytes）を default とし、
   512-byte genuine distribution payload の双方向 round trip を実機確認済みです。
 - 4 KiB payload の 9,600-baud 実機試験は旧 232-byte chunk 構成で `net_tick_timeout` になりました。現行の
-  96-byte chunk / 115,200 baud / 20 ms poll では 1 往復を 22.617 秒で完了し、その後 30 秒の idle 中も
-  connection を維持しました。ただし single run であり、9,600 baud では現行 chunk を再試験していません。
+  96-byte chunk / 20 ms poll では、9,600 baud で 1 往復を 36.051 秒、115,200 baud で 1 往復を 22.617 秒で
+  完了しました。どちらもその後 30 秒の idle 中に connection を維持しましたが、各条件 1 回だけであり、
+  連続 4 KiB traffic は未検証です。
 - zero-byte の established ping/pong RTT は matrix の single run で default の 9,600 baud / 20 ms が 1.326 秒、
   115,200 baud / 20 ms が 0.890 秒でした。512-byte payload の 30-message soak test の RTT min / average / max は、
   9,600 baud で 5.250 / 5.425 / 7.477 秒、115,200 baud で 3.245 / 3.311 / 4.923 秒でした。後者も

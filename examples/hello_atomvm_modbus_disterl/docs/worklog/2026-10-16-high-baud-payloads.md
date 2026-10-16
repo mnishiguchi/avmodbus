@@ -1,4 +1,4 @@
-# 115,200 baud での 512-byte soak と 4 KiB round trip — 2026-10-16
+# 115,200 baud での 512-byte soak と 4 KiB baud comparison — 2026-10-16
 
 ## 目的
 
@@ -11,6 +11,7 @@ baud / poll matrix では 115,200 baud の zero-byte ping/pong まで確認し�
 1. 512-byte payload の 30-message soak
 2. 4 KiB payload の 1-message bidirectional round trip
 3. 4 KiB round trip 完了後の idle connection
+4. 同じ 4 KiB payload の 9,600-baud comparison
 
 ## 構成
 
@@ -56,7 +57,7 @@ modbus_disterl: complete 30 remote ping/pong messages rtt_min_ms=3245 rtt_avg_ms
 average RTT は約 39% 短かった。ただし既存 soak は ping 間に 2 秒の delay があり、今回の
 `DISTERL_PING_DELAY_MS=0` とは条件が異なるため、run 全体の elapsed time は直接比較しない。
 
-## 4 KiB round trip
+## 4 KiB round trip — 115,200 baud
 
 追加設定:
 
@@ -84,14 +85,33 @@ modbus_disterl: complete 1 remote ping/pong messages rtt_min_ms=22617 rtt_avg_ms
 - Client 起動から完了まで: 22,799 ms
 - 完了後 30 秒の idle 観察中に `net_tick_timeout`、connection shutdown、追加 error は発生しなかった
 
+## 4 KiB round trip — 9,600 baud
+
+baud rate だけを default の 9,600 へ戻し、同じ 96-byte chunk、payload、ping count、timeout で再実行した。
+stream size と chunk 分割は 115,200-baud run と同じである。
+
+```text
+modbus_disterl: received ping 1 from :a@modbus.local payload_bytes=4096
+modbus_uart: queued bytes=4202
+modbus_disterl: received pong 1 from :b@modbus.local rtt_ms=36051 payload_bytes=4096
+modbus_disterl: complete 1 remote ping/pong messages rtt_min_ms=36051 rtt_avg_ms=36051 rtt_max_ms=36051 timeouts=0 elapsed_ms=36233
+```
+
+- application payload round trip: 1 / 1 成功
+- payload validation error: 0
+- pong timeout / retry: 0
+- RTT: 36,051 ms
+- Client 起動から完了まで: 36,233 ms
+- 完了後 30 秒の idle 観察中に `net_tick_timeout`、connection shutdown、追加 error は発生しなかった
+
 ## 判断
 
 115,200 baud / 20 ms poll / 96-byte chunk では、512-byte traffic を 30 往復しながら connection を維持できた。
-また、4 KiB の genuine distribution message も双方向へ 1 往復でき、旧構成で発生した
-`net_tick_timeout` は再現しなかった。
+また、4 KiB の genuine distribution message は 9,600 baud と 115,200 baud の両方で双方向へ 1 往復でき、
+旧 232-byte chunk 構成で発生した `net_tick_timeout` は再現しなかった。この比較は operating chunk の縮小が
+安定化に寄与したことを示すが、single run のため failure 原因を chunk size だけに限定はできない。
 
-一方、4 KiB は single run であり、連続 traffic や reboot recovery は未検証である。9,600 baud と現行
-96-byte chunk の組み合わせでも再試験していない。default は実績範囲の広い 9,600 baud / 20 ms のままとし、
-115,200 baud を一般的な安定動作として保証しない。
+一方、4 KiB は各 baud で single run であり、連続 traffic や reboot recovery は未検証である。default は
+実績範囲の広い 9,600 baud / 20 ms のままとし、115,200 baud を一般的な安定動作として保証しない。
 
 試験後、両 board は 9,600 baud / 20 ms poll / zero-byte payload の default distributed Erlang firmware へ戻した。
