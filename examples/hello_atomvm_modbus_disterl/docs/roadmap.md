@@ -1,65 +1,70 @@
 # ロードマップ
 
-このサンプルは、Modbus RTU 上で genuine distributed Erlang が動作することを確認するという
-当初の実験目標を達成しています。一方、carrier としては未完成であり、現在は信頼性と制約の調査を
-機能追加より優先します。
+このサンプルは、Modbus RTU 上で genuine distributed Erlang を動かすという当初の実験目標を達成しています。
+現在は新機能を増やす段階ではなく、experimental example として確認済みの範囲を維持しながら、残る制約を
+測定する段階です。
 
 実装と実行方法は [サンプル README](../README.md)、現在わかっている問題は
-[既知の制約](limitations.md)、実測結果は [作業記録](worklog/README.md) を参照してください。
+[既知の制約](limitations.md)、個々の実測結果は [作業記録](worklog/README.md) を参照してください。
+このページでは現在地と、今後の follow-up の優先順位だけを管理します。
 
-## 完了した検証
+## 現在地
 
-- [x] standalone Mix project と host-side test を追加する
-- [x] custom Function Code 100 で双方向 logical message を配送する
-- [x] sequence、ACK、再送による順序保証と重複抑止を確認する
-- [x] Server の起動遅延後に Client が timeout から復旧することを実機で確認する
-- [x] virtual UART adapter を介して `serial_dist` handshake を完了する
-- [x] 2 台の XIAO ESP32-C5 間で remote process の ping/pong を確認する
+| 項目 | 状態 | 確認済みの範囲 |
+| --- | --- | --- |
+| Phase 1: logical transport | 完了 | FC-100、双方向配送、順序保証、ACK、再送、重複抑止 |
+| Phase 2: genuine distribution | 完了 | `serial_dist` handshake、remote process の ping/pong |
+| session recovery | 完了 | client-only / server-only reboot、simultaneous startup、active-transfer reboot |
+| resource protection | 完了 | 8 KiB / 256 chunks の queue 上限、queue-full 時の session rollover |
+| startup liveness mitigation | 完了 | Client の peer readiness gate、Server の idle sync marker coalescing |
+| hardware baseline | 完了 | XIAO ESP32-C5 2 台、9,600 / 115,200 baud、512-byte soak、4 KiB traffic |
+| package boundary | 決定済み | carrier は AVModbus core に移さず、この example 内に維持 |
+| AtomVM setup retry fix | upstream follow-up | local patch と実機 A/B は完了、公式 release には未収録 |
 
-## 次に調査すること
+詳細な経緯をこの表へ重複させず、各結果は [作業記録](worklog/README.md)、長期的な判断は
+[ADR](adr/README.md) を正とします。
 
-- [x] boot/session ID と session-aware resynchronization を設計し、host test を追加する
-- [x] Client だけを reboot しても自動的に再接続できることを host test と実機で確認する
-- [x] Server だけを reboot しても自動的に再接続できることを実機で確認する
-- [x] 16-bit sequence number の wraparound を実装し、host test で検証する
-- [x] 64 KiB byte stream の chunk 分割、再構成、再送を host stress test する
-- [x] configurable deterministic payload を genuine distribution ping/pong に追加する
-- [x] 512-byte genuine distribution payload の Client-to-Server 配送と内容検証を実機で確認する
-- [x] Modbus transaction size、latency、累積 success / failure の opt-in tracing を追加する
-- [x] PackBEAM の `erlang:phash2/2` warning の発生箇所を特定し、unsupported failure path を除去する
-- [x] response 消失、CRC error、連続 timeout 後の復旧を host fault injection で検証する
-- [x] 232-byte 上限付近の不安定性を回避し、512-byte multi-chunk payload の bidirectional round trip を実機で確認する
-- [x] 30 回の 512-byte ping/pong soak test で tick frame と application traffic の共存を実機確認する
-- [x] 両 node の同時 reset で発生した stale frame の startup race を host test で再現し、実機で収束を確認する
-- [x] baud rate と poll interval ごとの handshake upper bound、RTT、setup timeout 境界を実機測定する
-- [x] 115,200 baud で 512-byte payload の 30-message soak test を実行する
-- [x] 現行の 96-byte chunk と 9,600 / 115,200 baud で 4 KiB payload の bidirectional round trip を実機確認する
-- [x] default の 9,600 baud で 4 KiB payload の 3-message consecutive traffic を実機確認する
-- [x] 4 KiB stream の最初の chunk 受信後に Server を reboot し、timeout 後の message 再送まで実機確認する
-- [x] outgoing queue を payload byte 数と chunk 数で制限し、amortized O(1) の FIFO に変更する
-- [x] initial handshakeのliveness failureをAtomVM sourceと実機で調査し、example-local setup retryを棄却する
-- [x] Phase 2 Clientのdefault startupを3秒遅らせ、約1.5秒Client先行の2 runで起動順序mitigationを実機確認する
-- [x] ClientのFC-100 peer readiness gateを追加し、startup delayなし・約70秒Client先行でping/pong復旧を実機確認する
-- [x] Client不在中の反復sync markerをcoalesceし、Serverを約210秒先行させてもqueue-fullにならず接続できることを実機確認する
-- [x] AtomVM `net_kernel`がsetup PIDをpending entryへ保存する修正と回帰testを追加し、readiness後の
-  40-response faultからapplication retryでhandshakeとping/pongへ復旧することを新旧boot libraryの実機A/Bで確認する
-  （[AtomVM setup retryの検証記録](worklog/2026-10-16-atomvm-setup-retry.md)）
-- [x] ACK-loss 下の queue / free heap と 8 KiB queue-full を実機測定する
-- [x] queue-full時にsessionをrolloverし、peer controller終了後のhandshakeとping/pong復旧を実機確認する
-- [x] queue-full後のsession rollover、peer boundary伝播、新streamの双方向配送を一連のhost testで固定する
-- [x] `ModbusUART.write` のqueue-full時にsession、receive buffer、timeoutが同時にresetされることをhost testで固定する
-- [x] local session rolloverで32-bit randomが直前のIDと一致しても、異なるIDを選ぶことをhost testで固定する
-- [x] stale blocked readerの置換とpeer session change時のinfinite reader closeをadapter-level host testで固定する
-- [x] 2-node proof of concept では virtual UART adapter を維持し、専用 `modbus_dist` carrier は実装しないと判断する
-  （[ADR 0003](adr/0003-adapt-serial-dist-with-a-virtual-uart.md)）
+## 今回の follow-up で完了した範囲
+
+- [x] outgoing queue を payload byte 数と chunk 数で制限し、amortized O(1) の FIFO にする
+- [x] queue-full を recoverable な transport session boundary として扱う
+- [x] reader lifecycle、session rollover、queue recovery を host test で固定する
+- [x] Client-first / Server-first の起動順序に対する mitigation を追加する
+- [x] 512-byte soak、4 KiB traffic、active-transfer reboot、limited ACK loss を実機で確認する
+- [x] AtomVM `net_kernel` の early setup failure を再現し、最小修正を新旧 boot library の実機 A/B で確認する
+- [x] carrier を example に維持する判断と、残る制約を ADR / worklog / README に記録する
+- [x] AVModbus core と既存 example を変更せず、standalone example の host test を通す
+
+この範囲で experimental example の follow-up は完了とします。以下の項目は現在の PR の完了条件ではなく、
+マージ後に追加の根拠を得るための候補です。
+
+## マージ後に確認すること
+
+- [ ] AtomVM の setup PID 修正を upstream PR として提案し、取り込まれた release の boot library で
+  failure-injection と ping/pong recovery を再確認する
+- [ ] 9,600 baud の default 構成で数時間の soak test を行い、queue、free heap、timeout 数の推移を記録する
+- [ ] 長時間の ACK loss と通信断・復旧の反復試験を行い、memory stability と session rollover の収束を確認する
+- [ ] 16-bit sequence が実際に wraparound するまで実機 traffic を継続し、host test の結果を補強する
+- [ ] 115,200 baud で 4 KiB payload の連続 traffic と active-transfer reboot を複数 run 実施する
+
+新しい検証を行うときは、先に成功条件と停止条件を決め、結果を `docs/worklog/` に追加します。単発の成功を
+一般的な保証へ広げず、再利用可能な API が必要になった場合だけ package boundary を再検討します。
+
+## 現在わかっている制約
+
+この carrier は proprietary FC-100 を使う 2-node proof of concept です。durable delivery、exactly-once、
+multidrop、direct UART 相当の latency は保証しません。queue 上限、実測済み payload、AtomVM patch の状態を含む
+詳細は [既知の制約](limitations.md) を正とします。
 
 ## 判断したこと
 
 - [x] proprietary FC-100 carrier は AVModbus の一般 API に移さない
 - [x] 現時点では独立 package に分離せず、example のまま保守する
+- [x] 2-node proof of concept では virtual UART adapter を維持し、専用 `modbus_dist` carrier は実装しない
 
-これらの package boundary は [ADR 0012](adr/0012-keep-the-carrier-in-the-example.md) に記録しています。
-example 外の具体的な利用者と安定した lifecycle contract が得られた場合に再検討します。
+package boundary は [ADR 0012](adr/0012-keep-the-carrier-in-the-example.md)、virtual UART の判断は
+[ADR 0003](adr/0003-adapt-serial-dist-with-a-virtual-uart.md) に記録しています。example 外の具体的な利用者と
+安定した lifecycle contract が得られた場合に再検討します。
 
 ## 今回は対象としないこと
 
