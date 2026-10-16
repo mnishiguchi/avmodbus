@@ -26,6 +26,22 @@ Modbus RTU・ASCII・TCP に対応し、データを読み取る Client と、�
 
 対応状況と実機で確認した構成は [互換性表](docs/compatibility.md) に記録しています。
 
+## 実験: AVModbus 上の distributed Erlang
+
+AVModbus の custom Function Code `100` を transport primitive として使い、AtomVM の
+`serial_dist` を Modbus RTU / RS485 上で動かすことに成功しています。2 台の XIAO
+ESP32-C5 で genuine distribution handshake、remote process の ping / pong、512-byte
+payload の連続往復、再起動後の再同期を確認しました。
+
+これは [独立した実験用サンプル](examples/hello_atomvm_modbus_disterl/README.md) の成果です。
+AVModbus が distributed Erlang carrier を public API として提供している、または production
+用途をサポートしているという意味ではありません。polling、sequence / ACK、session recovery、
+virtual UART adapter はサンプル内にあり、`lib/avmodbus/` は変更していません。
+
+- [実験の構成と再現手順](examples/hello_atomvm_modbus_disterl/README.md)
+- [実機試験と測定結果](examples/hello_atomvm_modbus_disterl/docs/worklog/README.md)
+- [既知の制約](https://github.com/mnishiguchi/avmodbus/blob/main/examples/hello_atomvm_modbus_disterl/docs/limitations.md)
+
 ## Client の例
 
 Unit ID `1` の Holding Register を、アドレス `0` から 2 個読み取ります。

@@ -14,6 +14,7 @@
 | 2026-10-10〜11 | RS485 実機通信、長時間テスト、メモリ計測、TCP リソース上限の調査 |
 | 2026-10-12〜13 | UART の受信データ欠落対策、Serial Transport の整理、待機キューとタイムアウト管理の強化 |
 | 2026-10-13〜14 | TCP 接続・handler の終了処理、受信バッファー制限、負荷テスト、外部実装との CI を強化 |
+| 2026-10-15〜16 | custom FC-100 carrier を使い、Modbus RTU 上の AtomVM distributed Erlang を実機検証 |
 
 ## 実験から得た重要な知見
 
@@ -71,6 +72,23 @@ ESP32-C5 で接続負荷を増やした際、復旧可能なエラーが Elixir 
 **判断:** TCP の受信処理と handler の寿命を、接続ごとに管理します。
 詳細は [ADR 0007](../adr/0007-isolate-modbus-tcp-connections.md) を参照してください。
 
+### 6. Custom Function Code は `serial_dist` の carrier primitive にできる
+
+**環境:** XIAO ESP32-C5 × 2、HW-519 × 2、AtomVM
+`v0.7.0-beta.0+git.8d3e051`、2-wire RS485。
+
+custom Function Code `100` の request / response に polling、sequence / ACK、session ID を
+重ね、その上の virtual UART adapter を AtomVM の `serial_dist` へ接続しました。genuine
+distribution handshake と remote process messaging に加え、512-byte payload の 30 往復を
+223.327 秒、error と pong timeout なしで完了しました。片側または両側の再起動後の再同期も
+確認しています。
+
+**判断:** AVModbus の custom function support は application-specific carrier の実装に利用できます。
+ただし、今回の polling protocol、stream adaptation、recovery logic は Modbus library の一般機能では
+ありません。AVModbus core を変更せず、[standalone example](../../examples/hello_atomvm_modbus_disterl/README.md)
+内で実験を継続します。条件、測定値、残る制約は
+[実験の worklog](../../examples/hello_atomvm_modbus_disterl/docs/worklog/README.md) に記録しています。
+
 ## 検証記録を探す
 
 | 内容 | 記録場所 |
@@ -79,6 +97,7 @@ ESP32-C5 で接続負荷を増やした際、復旧可能なエラーが Elixir 
 | 実機のメモリ使用量、TCP loopback、`.avm` の測定値 | [リソース計測](resource-measurements.md) |
 | TCP 高負荷時の調査と再現条件 | [TCP リソース調査記録](atomvm-tcp-investigation.md) |
 | `pymodbus` / `libmodbus` と動作確認した組み合わせ | [互換性表](../compatibility.md) |
+| Modbus RTU 上の distributed Erlang、性能、復旧試験 | [実験の worklog](../../examples/hello_atomvm_modbus_disterl/docs/worklog/README.md) |
 | 将来も守りたい設計上の判断 | [ADR 一覧](../adr/README.md) |
 
 ## 新しい実験を記録するとき

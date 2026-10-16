@@ -6,6 +6,11 @@ AVModbus は RTU・ASCII・TCP の Client / Server と、基本的なエラー�
 実装済みの機能は [README](../README.md)、経緯は [開発記録](development/worklog.md) と
 [設計判断](adr/README.md) を参照してください。
 
+Modbus RTU 上で AtomVM の distributed Erlang を動かす調査は、AVModbus core の機能計画とは
+分けて [standalone example のロードマップ](../examples/hello_atomvm_modbus_disterl/docs/roadmap.md)
+で管理しています。実機での remote messaging は確認済みですが、production-ready な carrier
+として AVModbus がサポートしているわけではありません。
+
 ## 次に確認すること
 
 - [ ] GitHub Actions の相互運用テストが継続して成功することを確認する

@@ -16,3 +16,12 @@ AVModbus はまだ公開リリースを行っていません。以下は初回�
 - 通信中のエラーや切断からの復旧処理を改善
 - TCP 接続ごとの受信バッファー、終了処理、リソース管理を強化
 - AtomVM のメモリ使用量とファームウェアサイズの計測方法を整備
+
+### 実験
+
+- AVModbus の custom Function Code `100` を transport primitive として利用する
+  [distributed Erlang over Modbus RTU example](examples/hello_atomvm_modbus_disterl/README.md) を追加
+- 2 台の XIAO ESP32-C5 で AtomVM の genuine distribution handshake、remote process
+  messaging、multi-chunk payload、session recovery を確認
+- carrier と virtual UART adapter はサンプル内に限定し、AVModbus の public API と
+  production support の対象外であることを文書化
