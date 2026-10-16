@@ -9,6 +9,7 @@
 - [2026-10-16: Queue memory と ACK-loss](2026-10-16-queue-memory-and-ack-loss.md)
 - [2026-10-16: initial-handshake liveness と起動順序mitigation](2026-10-16-initial-handshake-liveness.md)
 - [2026-10-16: FC-100 peer readiness gate実機検証](2026-10-16-peer-readiness-gate.md)
+- [2026-10-16: Server先行時のidle sync coalescing実機検証](2026-10-16-server-idle-sync-coalescing.md)
 - [2026-10-16: 外部 review follow-up — bounded queue と RTU frame size](2026-10-16-review-follow-up.md)
 - [2026-10-16: 4 KiB 転送中の Server reboot recovery](2026-10-16-active-transfer-recovery.md)
 - [2026-10-16: 115,200 baud での 512-byte soak と 4 KiB traffic](2026-10-16-high-baud-payloads.md)

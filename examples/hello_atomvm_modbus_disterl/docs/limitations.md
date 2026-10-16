@@ -10,6 +10,9 @@
   Elixir term や binary の runtime overhead を含む厳密な heap 上限ではありません。さらに `serial_dist_controller` は
   adapter 呼び出し前に frame binary を作るため、16 KiB application payload は queue check に到達する前に実機で
   OOM になりました。8 KiB application payload / 8 KiB cap は 8,304-byte write を `:queue_full` で拒否できました。
+- AtomVM `serial_dist`がidle中に500 msごとにwriteするexact 2-byte sync markerは、未ACKの同じmarker 1 chunkへ
+  coalesceします。Serverを約210秒先行させた後もqueue-fullにならず、Client起動後にping/pong 3 / 3を完了しました。
+  これは既知のidle markerだけを対象とし、通常dataのqueue上限やbackpressureを緩和しません。
 - queue-full時はlocal sessionをrolloverし、peerの旧readerも閉じます。8 KiB probeの実機runでは最初のoversize
   pingが1回timeoutした後、通常payloadのretryでhandshakeとping/pongを再確立しました。ただしqueue済み / in-flight
   stream dataは破棄され、application retryに依存します。これはdurable deliveryやexactly-onceの保証ではありません。

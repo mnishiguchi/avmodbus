@@ -36,6 +36,8 @@ Node B sends queued data only in a response to a poll.
   `serial_dist` controller は `serial_write_error` で接続を終了するため、silent drop や無制限 block は行わない
 - queue-full時はlocal Channelを新しいsessionへrolloverし、古いoutgoing / receive streamを破棄する。次のpollで
   peerがsession changeを検出すると、古いinfinite readerを`:closed`で終了し、両側を新しいhandshakeへ戻す
+- Client不在中に`serial_dist` link managerが繰り返すexact 2-byte sync markerは、未ACKの同じmarkerがoutgoingまたは
+  pendingにあれば追加queueせず、1 chunkにcoalesceする
 - ACK されるまで同じ sequence と payload を再送する
 - 受信済み sequence の再送は配達せず、ACK だけを再送する
 - `sequence = 0` は送信 data なし、`acknowledgment = 0` は ACK なしを表す

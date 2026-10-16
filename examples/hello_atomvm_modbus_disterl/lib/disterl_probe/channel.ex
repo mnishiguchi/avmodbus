@@ -167,6 +167,12 @@ defmodule DisterlProbe.Channel do
   def pending_payloads(%{pending: pending}),
     do: Enum.map(queue_to_list(pending), fn {_sequence, payload} -> payload end)
 
+  @doc false
+  def queued_payload?(%{outgoing: {_sequence, payload}}, payload), do: true
+
+  def queued_payload?(%{pending: {front, rear}}, payload),
+    do: payload_in_queue?(front, payload) or payload_in_queue?(rear, payload)
+
   def complete?(state, expected_received)
       when is_integer(expected_received) and expected_received >= 0,
       do: done?(state) and state.received == expected_received
@@ -271,6 +277,10 @@ defmodule DisterlProbe.Channel do
   defp queue_empty?({[], []}), do: true
   defp queue_empty?(_queue), do: false
   defp queue_to_list({front, rear}), do: front ++ reverse(rear, [])
+
+  defp payload_in_queue?([], _payload), do: false
+  defp payload_in_queue?([{_sequence, payload} | _rest], payload), do: true
+  defp payload_in_queue?([_message | rest], payload), do: payload_in_queue?(rest, payload)
 
   defp reverse(list, accumulator), do: do_reverse(list, accumulator)
   defp do_reverse([], accumulator), do: accumulator

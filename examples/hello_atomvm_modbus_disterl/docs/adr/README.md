@@ -28,3 +28,4 @@
 - [0011: queue-full を transport session boundary とする](0011-roll-session-on-queue-full.md)
 - [0012: experimental carrier を example 内に維持する](0012-keep-the-carrier-in-the-example.md)
 - [0013: FC-100 peer readiness を確認してから net_kernel を開始する](0013-gate-net-kernel-on-peer-readiness.md)
+- [0014: idle serial sync marker を未 ACK の 1 chunk へまとめる](0014-coalesce-idle-serial-sync-markers.md)

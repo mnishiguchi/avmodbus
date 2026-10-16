@@ -22,6 +22,7 @@ defmodule DisterlProbe.ModbusUART do
 
   @function_code 100
   @max_payload Protocol.max_payload()
+  @serial_sync <<0xAA, 0x55>>
 
   # serial_dist expects a UART handle directly, not an {:ok, handle} tuple.
   def open(options) when is_list(options) do
@@ -137,42 +138,24 @@ defmodule DisterlProbe.ModbusUART do
   end
 
   @impl true
+  def handle_call(
+        {:write, @serial_sync},
+        _from,
+        state
+      ) do
+    if Channel.queued_payload?(state.channel, @serial_sync) do
+      {:reply, :ok, state}
+    else
+      queue_write(@serial_sync, state)
+    end
+  end
+
   def handle_call(:peer_ready, _from, state) do
     {:reply, state.channel.peer_session != nil, state}
   end
 
   def handle_call({:write, data}, _from, state) do
-    log_stream_data("queued", data)
-
-    case queue_chunks(state.channel, data, state.chunk_payload_bytes) do
-      {:ok, channel} ->
-        response_timeout =
-          ResponseTimeout.observe_write(
-            state.response_timeout,
-            byte_size(data),
-            state.chunk_payload_bytes
-          )
-
-        log_timeout_change(state.response_timeout, response_timeout, byte_size(data))
-
-        next = %{
-          state
-          | channel: channel,
-            response_timeout: response_timeout,
-            trace_queue_active: state.trace_queue_active or traceable_write?(byte_size(data))
-        }
-
-        log_queue("accepted", next, byte_size(data))
-        {:reply, :ok, next}
-
-      {:error, _reason} = error ->
-        IO.puts(
-          "modbus_uart: queue rejected bytes=#{byte_size(data)} reason=#{inspect(elem(error, 1))}"
-        )
-
-        log_queue("rejected", state, byte_size(data))
-        {:reply, error, recover_rejected_write(state, elem(error, 1))}
-    end
+    queue_write(data, state)
   end
 
   def handle_call({:read, timeout}, from, %{rx_buffer: <<>>} = state) do
@@ -210,6 +193,40 @@ defmodule DisterlProbe.ModbusUART do
       end
     else
       {:error, _reason} -> {:reply, {:error, {:exception, :illegal_data_value}}, state}
+    end
+  end
+
+  defp queue_write(data, state) do
+    log_stream_data("queued", data)
+
+    case queue_chunks(state.channel, data, state.chunk_payload_bytes) do
+      {:ok, channel} ->
+        response_timeout =
+          ResponseTimeout.observe_write(
+            state.response_timeout,
+            byte_size(data),
+            state.chunk_payload_bytes
+          )
+
+        log_timeout_change(state.response_timeout, response_timeout, byte_size(data))
+
+        next = %{
+          state
+          | channel: channel,
+            response_timeout: response_timeout,
+            trace_queue_active: state.trace_queue_active or traceable_write?(byte_size(data))
+        }
+
+        log_queue("accepted", next, byte_size(data))
+        {:reply, :ok, next}
+
+      {:error, _reason} = error ->
+        IO.puts(
+          "modbus_uart: queue rejected bytes=#{byte_size(data)} reason=#{inspect(elem(error, 1))}"
+        )
+
+        log_queue("rejected", state, byte_size(data))
+        {:reply, error, recover_rejected_write(state, elem(error, 1))}
     end
   end
 

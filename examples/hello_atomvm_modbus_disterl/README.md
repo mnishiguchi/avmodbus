@@ -36,6 +36,9 @@ reboot しても、Client が session 変更を検出し、1回の pong timeout 
 一方、initial handshake 中に stale session から現在の session へ切り替わった後、connection retry が進まない
 起動順序依存も見つかっています。default build は Client のFC-100 adapterを先に開き、Serverから有効なresponseを
 受け取ってから同じadapterを`serial_dist`へ渡します。Clientを約70秒先行させた実機runでもping/pong 3 / 3へ進みました。
+逆の起動順序では、Serverが繰り返すidle sync markerを未ACKの1 chunkへまとめます。Serverを約210秒先行させた
+実機runでもqueue-fullにならず、Client起動後にping/pong 3 / 3を完了しました。詳細は
+[Server-first idle sync verification](docs/worklog/2026-10-16-server-idle-sync-coalescing.md) にあります。
 これは AtomVM の任意のhalf-open connection cleanupを修正するものではありません。
 調査、棄却した retry wrapper、2 run の実機結果は
 [initial-handshake liveness investigation](docs/worklog/2026-10-16-initial-handshake-liveness.md) に記録しています。

@@ -46,6 +46,33 @@ defmodule DisterlProbe.ModbusUARTTest do
     assert {:reply, true, ^ready} = ModbusUART.handle_call(:peer_ready, :unused_from, ready)
   end
 
+  test "repeated idle sync markers share one unacknowledged outgoing chunk" do
+    state = adapter_state(Channel.new(100))
+
+    assert {:reply, :ok, queued} = callback({:write, <<0xAA, 0x55>>}, state)
+    assert queued.channel.outstanding == 1
+    assert queued.channel.queued_bytes == 2
+
+    assert {:reply, :ok, coalesced} = callback({:write, <<0xAA, 0x55>>}, queued)
+    assert coalesced == queued
+
+    assert {:reply, :ok, distinct} = callback({:write, <<0xAA, 0x54>>}, coalesced)
+    assert distinct.channel.outstanding == 2
+    assert distinct.channel.queued_bytes == 4
+  end
+
+  test "repeated idle sync markers share one pending chunk" do
+    state = adapter_state(Channel.new(100))
+
+    assert {:reply, :ok, data_queued} = callback({:write, <<0x01, 0x02>>}, state)
+    assert {:reply, :ok, sync_queued} = callback({:write, <<0xAA, 0x55>>}, data_queued)
+    assert sync_queued.channel.outstanding == 2
+
+    assert {:reply, :ok, coalesced} = callback({:write, <<0xAA, 0x55>>}, sync_queued)
+    assert coalesced == sync_queued
+    assert Channel.pending_payloads(coalesced.channel) == [<<0xAA, 0x55>>]
+  end
+
   test "uses a configured payload size below the wire protocol maximum" do
     payload = :binary.copy(<<0xA5>>, 300)
     assert {:ok, channel} = ModbusUART.queue_chunks(Channel.new(300), payload, 96)
