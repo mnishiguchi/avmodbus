@@ -7,6 +7,22 @@ parse_integer = fn name, default ->
   end
 end
 
+parse_boolean = fn name, default ->
+  case System.get_env(name) do
+    nil ->
+      default
+
+    value when value in ["1", "true"] ->
+      true
+
+    value when value in ["0", "false"] ->
+      false
+
+    value ->
+      raise ArgumentError, "#{name} must be one of 1, true, 0, or false; got #{inspect(value)}"
+  end
+end
+
 mode = if System.get_env("MODBUS_EXPERIMENT") == "disterl", do: :disterl, else: :transport
 role = if System.get_env("MODBUS_ROLE") == "server", do: :server, else: :client
 ping_payload_bytes = parse_integer.("DISTERL_PAYLOAD_BYTES", 0)
@@ -17,8 +33,10 @@ drop_responses = parse_integer.("MODBUS_FAULT_DROP_RESPONSES", 0)
 fault_min_payload_bytes = parse_integer.("MODBUS_FAULT_MIN_PAYLOAD_BYTES", 96)
 fault_after_ms = parse_integer.("MODBUS_FAULT_AFTER_MS", 10_000)
 queue_full_probe_bytes = parse_integer.("DISTERL_QUEUE_FULL_PROBE_BYTES", 0)
-default_start_delay_ms = if mode == :disterl and role == :client, do: 3_000, else: 0
-start_delay_ms = parse_integer.("MODBUS_START_DELAY_MS", default_start_delay_ms)
+start_delay_ms = parse_integer.("MODBUS_START_DELAY_MS", 0)
+
+wait_for_peer =
+  parse_boolean.("MODBUS_WAIT_FOR_PEER", mode == :disterl and role == :client)
 
 if ping_payload_bytes < 0 do
   raise ArgumentError, "DISTERL_PAYLOAD_BYTES must be a non-negative integer"
@@ -98,6 +116,7 @@ config :disterl_probe,
   poll_ms: parse_integer.("MODBUS_POLL_INTERVAL_MS", if(mode == :disterl, do: 20, else: 1_000)),
   trace_transactions: System.get_env("MODBUS_TRACE_TRANSACTIONS") in ["1", "true"],
   trace_queue: System.get_env("MODBUS_TRACE_QUEUE") in ["1", "true"],
+  wait_for_peer: wait_for_peer,
   node_alias: System.get_env("ATOMVM_NODE_ALIAS") || if(role == :server, do: "b", else: "a"),
   peer_alias: System.get_env("ATOMVM_PEER_ALIAS") || if(role == :server, do: "a", else: "b"),
   cookie: System.get_env("ATOMVM_COOKIE") || "AtomVM",

@@ -25,9 +25,18 @@ defmodule DisterlProbe.ModbusUART do
 
   # serial_dist expects a UART handle directly, not an {:ok, handle} tuple.
   def open(options) when is_list(options) do
-    case GenServer.start(__MODULE__, options) do
-      {:ok, pid} -> pid
-      {:error, _reason} = error -> error
+    case Keyword.get(options, :existing) do
+      nil ->
+        case GenServer.start(__MODULE__, options) do
+          {:ok, pid} -> pid
+          {:error, _reason} = error -> error
+        end
+
+      pid when is_pid(pid) ->
+        pid
+
+      _invalid ->
+        {:error, :invalid_existing_adapter}
     end
   end
 
@@ -45,6 +54,9 @@ defmodule DisterlProbe.ModbusUART do
       when is_pid(pid) and
              (timeout == :infinity or (is_integer(timeout) and timeout >= 0)),
       do: GenServer.call(pid, {:read, timeout}, :infinity)
+
+  @doc false
+  def peer_ready?(pid) when is_pid(pid), do: GenServer.call(pid, :peer_ready, :infinity)
 
   @doc false
   def queue_chunks(channel, data), do: queue_chunks(channel, data, @max_payload)
@@ -125,6 +137,10 @@ defmodule DisterlProbe.ModbusUART do
   end
 
   @impl true
+  def handle_call(:peer_ready, _from, state) do
+    {:reply, state.channel.peer_session != nil, state}
+  end
+
   def handle_call({:write, data}, _from, state) do
     log_stream_data("queued", data)
 

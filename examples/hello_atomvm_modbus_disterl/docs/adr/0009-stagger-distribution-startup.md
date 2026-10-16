@@ -1,5 +1,7 @@
 # 0009: Client の distribution startup を遅らせる
 
+この判断は [ADR 0013](0013-gate-net-kernel-on-peer-readiness.md) で置き換えました。
+
 ## 背景
 
 直前のtrafficがUART / RTU bufferに残り、ClientがServerより約1〜2秒先に起動すると、initial handshake中の

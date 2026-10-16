@@ -27,3 +27,4 @@
 - [0010: outgoing queue の default byte 上限を 8 KiB に下げる](0010-reduce-default-queue-byte-limit.md)
 - [0011: queue-full を transport session boundary とする](0011-roll-session-on-queue-full.md)
 - [0012: experimental carrier を example 内に維持する](0012-keep-the-carrier-in-the-example.md)
+- [0013: FC-100 peer readiness を確認してから net_kernel を開始する](0013-gate-net-kernel-on-peer-readiness.md)

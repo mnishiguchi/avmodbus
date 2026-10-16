@@ -21,11 +21,11 @@
 - session 変更時の transport resynchronization と、client-only / server-only reboot 後の
   `serial_dist` 再接続は host test と実機で確認済みです。確立済み connection では、4 KiB stream の最初の
   96-byte chunk 受信後に Server を reboot しても、1 回の pong timeout 後に message を再送して復旧しました。
-- 直前の traffic が UART / RTU buffer に残り、Client が Server より約 1〜2 秒先に起動した 2 run では、initial
-  handshake 中の peer session change 後に application ping retry だけでは新しい handshake が始まりませんでした。
-  defaultのPhase 2 Clientには3秒のstartup delayを入れ、約1.5秒Client先行の2 runでping/pong 3 / 3、timeout 0を
-  確認しました。ただしこれは起動順序によるmitigationであり、session change後のhalf-open connection cleanupと
-  connection retry trigger自体は未解決です。Clientが3秒以上先に起動する条件は保証しません。
+- 直前のtrafficがUART / RTU bufferに残り、ClientがServerより約1〜2秒先に起動した2 runでは、initial handshake中の
+  peer session change後にapplication ping retryだけでは新しいhandshakeが始まりませんでした。defaultのPhase 2 Clientは
+  FC-100 peer responseを確認するまで`net_kernel`を開始しません。Clientを約70秒先行させた実機runでping/pong 3 / 3、
+  timeout 0を確認しました。ただしこれはinitial setupを開始する前のreadiness gateです。readiness確認後に発生する任意の
+  half-open connection cleanupとconnection retry trigger自体は、AtomVM側で未解決です。
 - AtomVM `net_kernel` の distribution setup timeout は 7 秒固定です。9,600 baud の検証構成では成功しましたが、
   1,000 ms poll interval では setup timeout になりました。500 ms は 1 回成功したものの安全域とはみなさず、20 ms を
   default とします。

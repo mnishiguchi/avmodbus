@@ -33,6 +33,19 @@ defmodule DisterlProbe.ModbusUARTTest do
     assert ModbusUART.queue_chunks(channel, <<>>) == {:ok, channel}
   end
 
+  test "open reuses an explicitly prepared adapter" do
+    assert ModbusUART.open(existing: self()) == self()
+    assert ModbusUART.open(existing: :not_a_pid) == {:error, :invalid_existing_adapter}
+  end
+
+  test "peer readiness follows channel session observation" do
+    state = adapter_state(Channel.new(100))
+    assert {:reply, false, ^state} = ModbusUART.handle_call(:peer_ready, :unused_from, state)
+
+    ready = put_in(state.channel.peer_session, 200)
+    assert {:reply, true, ^ready} = ModbusUART.handle_call(:peer_ready, :unused_from, ready)
+  end
+
   test "uses a configured payload size below the wire protocol maximum" do
     payload = :binary.copy(<<0xA5>>, 300)
     assert {:ok, channel} = ModbusUART.queue_chunks(Channel.new(300), payload, 96)

@@ -63,10 +63,10 @@ Client は handshake 中に 500 ms の response timeout を使います。`seria
 queue した後は 2000 ms の bulk timeout に切り替え、peer session が変わると 500 ms に戻します。これにより
 AtomVM の 7 秒 handshake budget を維持しながら、接続後の multi-chunk traffic に余裕を与えます。
 
-Phase 2 Client はdefaultでapplication startupを3秒遅らせます。delayは`net_kernel`開始前に適用するため、7秒の
-distribution setup timerを消費しません。Modbus Serverを先にreadyにし、両boardの同時給電時にinitial handshakeが
-旧sessionから現sessionへ切り替わる条件を避けるためのstartup-order mitigationです。`proto_dist`は引き続き
-AtomVMの`:serial_dist`を直接使用し、example独自のsetup retry wrapperは挟みません。
+Phase 2 ClientはdefaultでModbusUARTをpre-openし、有効なFC-100 responseからpeer sessionを観測するまで待ちます。
+そのPIDを`serial_dist`の`uart_module.open/1`へ渡して再利用するため、UARTをclose / reopenしません。Server不在中は
+`net_kernel`を開始せず、7秒のdistribution setup timerを消費しません。`proto_dist`は引き続きAtomVMの
+`:serial_dist`を直接使用し、example独自のsetup retry wrapperは挟みません。
 
 `MODBUS_TRACE_TRANSACTIONS=1` では Client の non-idle physical transaction と全 failure について request /
 response byte 数、経過時間、poll 番号、最大 latency、累積 success / failure 数を出力します。13-byte の

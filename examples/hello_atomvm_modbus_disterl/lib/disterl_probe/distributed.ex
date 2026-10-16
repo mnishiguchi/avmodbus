@@ -23,6 +23,7 @@ defmodule DisterlProbe.Distributed do
   @poll_ms Application.compile_env(:disterl_probe, :poll_ms, 20)
   @trace_transactions Application.compile_env(:disterl_probe, :trace_transactions, false)
   @trace_queue Application.compile_env(:disterl_probe, :trace_queue, false)
+  @wait_for_peer Application.compile_env(:disterl_probe, :wait_for_peer, false)
   @node_alias Application.compile_env(:disterl_probe, :node_alias, "a")
   @peer_alias Application.compile_env(:disterl_probe, :peer_alias, "b")
   @cookie Application.compile_env(:disterl_probe, :cookie, "AtomVM")
@@ -31,7 +32,12 @@ defmodule DisterlProbe.Distributed do
     identity = identity()
     started_at = :erlang.monotonic_time(:millisecond)
 
-    case :net_kernel.start(identity.node, dist_options()) do
+    uart = prepare_uart(identity.role)
+    start_distribution(identity, started_at, uart)
+  end
+
+  defp start_distribution(identity, started_at, uart) do
+    case :net_kernel.start(identity.node, dist_options(uart)) do
       {:ok, _pid} ->
         :ok = :net_kernel.set_cookie(@cookie)
         log_started(identity)
@@ -39,8 +45,33 @@ defmodule DisterlProbe.Distributed do
         Process.sleep(:infinity)
 
       other ->
-        IO.puts("modbus_disterl: net_kernel start failed #{inspect(other)}")
-        Process.sleep(:infinity)
+        if uart != nil, do: DisterlProbe.ModbusUART.close(uart)
+        halt("net_kernel start failed", other)
+    end
+  end
+
+  defp prepare_uart(role) do
+    if @wait_for_peer and role == :client do
+      case DisterlProbe.ModbusUART.open(uart_options()) do
+        pid when is_pid(pid) ->
+          IO.puts("modbus_disterl: waiting for FC-100 peer before starting net_kernel")
+          wait_for_peer(pid)
+
+        {:error, reason} ->
+          halt("peer readiness failed", reason)
+      end
+    else
+      nil
+    end
+  end
+
+  defp wait_for_peer(pid) do
+    if DisterlProbe.ModbusUART.peer_ready?(pid) do
+      IO.puts("modbus_disterl: FC-100 peer ready; starting net_kernel")
+      pid
+    else
+      Process.sleep(max(@poll_ms, 1))
+      wait_for_peer(pid)
     end
   end
 
@@ -52,30 +83,41 @@ defmodule DisterlProbe.Distributed do
     }
   end
 
-  defp dist_options do
+  defp dist_options(uart) do
     %{
       name_domain: :longnames,
       proto_dist: :serial_dist,
       avm_dist_opts: %{
-        uart_opts: [
-          role: @role,
-          serial: @serial,
-          unit_id: @unit_id,
-          timeout_ms: @timeout_ms,
-          bulk_timeout_ms: @bulk_timeout_ms,
-          chunk_payload_bytes: @chunk_payload_bytes,
-          max_queued_bytes: @max_queued_bytes,
-          max_queued_chunks: @max_queued_chunks,
-          fault_drop_responses: @fault_drop_responses,
-          fault_min_payload_bytes: @fault_min_payload_bytes,
-          fault_after_ms: @fault_after_ms,
-          poll_ms: @poll_ms,
-          trace_transactions: @trace_transactions,
-          trace_queue: @trace_queue
-        ],
+        uart_opts: uart_options(uart),
         uart_module: DisterlProbe.ModbusUART
       }
     }
+  end
+
+  defp uart_options(existing \\ nil) do
+    options = [
+      role: @role,
+      serial: @serial,
+      unit_id: @unit_id,
+      timeout_ms: @timeout_ms,
+      bulk_timeout_ms: @bulk_timeout_ms,
+      chunk_payload_bytes: @chunk_payload_bytes,
+      max_queued_bytes: @max_queued_bytes,
+      max_queued_chunks: @max_queued_chunks,
+      fault_drop_responses: @fault_drop_responses,
+      fault_min_payload_bytes: @fault_min_payload_bytes,
+      fault_after_ms: @fault_after_ms,
+      poll_ms: @poll_ms,
+      trace_transactions: @trace_transactions,
+      trace_queue: @trace_queue
+    ]
+
+    if existing == nil, do: options, else: [{:existing, existing} | options]
+  end
+
+  defp halt(message, reason) do
+    IO.puts("modbus_disterl: #{message} #{inspect(reason)}")
+    Process.sleep(:infinity)
   end
 
   defp log_started(identity) do

@@ -80,6 +80,10 @@ link managerを含むretry lifecycleを検証する必要がある。exampleは�
 1. setup processが`mark_pending/4`より前に終了する条件をAtomVM testで作り、次のconnectが新しいsetupを開始することを確認する
 2. 修正版system libraryで両boardをbuildし、Clientの`MODBUS_START_DELAY_MS=0`かつClientを3秒以上先行させる
 3. peer側controllerの終了、新しいhandshake、ping/pongまでを複数runで確認する
-4. upstream修正が利用可能になるまで、exampleの3秒startup delayを維持する
+4. initial setup前の起動順序には、固定delayを置き換えるFC-100 peer readiness gateを実機検証する
 
 この修正候補はAVModbusやFC-100 transportの責務ではないため、exampleへ`net_kernel`を複製しない。
+
+4は同日に実施し、約70秒Client先行でもping/pongへ進むことを確認した。結果とdefault変更は
+[peer readiness gate実機検証](2026-10-16-peer-readiness-gate.md)と
+[ADR 0013](../adr/0013-gate-net-kernel-on-peer-readiness.md)に記録している。
