@@ -3,6 +3,21 @@ defmodule DisterlProbe.ChannelTest do
 
   alias DisterlProbe.{Channel, Protocol}
 
+  test "restart preserves queue limits and creates a clean session boundary" do
+    channel = Channel.new(100, max_queued_bytes: 192, max_queued_chunks: 2)
+    assert {:ok, channel} = Channel.queue(channel, <<1>>)
+
+    restarted = Channel.restart(channel, 200)
+
+    assert restarted.session == 200
+    assert restarted.peer_session == nil
+    assert restarted.max_queued_bytes == 192
+    assert restarted.max_queued_chunks == 2
+    assert restarted.queued_bytes == 0
+    assert restarted.outstanding == 0
+    assert Channel.done?(restarted)
+  end
+
   test "exchanges independently queued messages and acknowledges both" do
     {:ok, a} = Channel.queue(Channel.new(), <<0, 1, 2>>)
     {:ok, b} = Channel.queue(Channel.new(), <<3, 4, 5>>)

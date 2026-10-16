@@ -55,6 +55,36 @@ fail-fast は意図どおりだったが、15秒後の zero-byte ping retry で�
 ping/pong へ復旧しなかった。queue-full 後の controller recovery は未達であり、initial startup で確認した AtomVM
 `net_kernel` / `serial_dist` の half-open connection cleanup と同じ領域の blocker と判断する。
 
+### Session rollover follow-up
+
+失敗時のlogとAtomVM `serial_dist` sourceを照合すると、local controller終了後もpeer controllerが古いdata phaseに残り、
+次のhandshake bytesを以前のstreamとして読むことが`crc_error`の直接条件だった。queue-full時にClient Channelを新しい
+sessionへrolloverするよう変更し、同じ8 KiB probeを再実行した。
+
+```text
+modbus_uart: queue rejected bytes=8304 reason=:queue_full
+modbus_uart: queue-full stream reset session=1433346836 -> 4243333236
+```
+
+Serverは次のpollでsession changeを検出し、旧controllerのblocked readerを閉じた。
+
+```text
+modbus_uart: peer session changed 1433346836 -> 4243333236; resetting stream
+serial_dist_controller: {serial_read_error,closed}
+```
+
+Clientの最初のoversize pingは意図どおりtimeoutした。15秒後の通常zero-byte ping retryでは両側が新しいhandshakeを完了し、
+remote pongまで復旧した。
+
+```text
+modbus_disterl: received pong 1 from :b@modbus.local rtt_ms=3696 payload_bytes=0
+modbus_disterl: complete 1 remote ping/pong messages rtt_min_ms=3696 \
+rtt_avg_ms=3696 rtt_max_ms=3696 timeouts=1 elapsed_ms=22922
+```
+
+このfollow-upにより、確立済みconnectionのqueue-full後に残るpeer half-open stateはexampleのsession boundaryで解放できた。
+initial handshake中の`net_kernel` pending entry問題とは発生段階が異なり、後者は引き続き未解決である。
+
 ## 4 KiB ACK-loss
 
 default queue に 4,096-byte payload を送信し、Server は起動7秒後から payload 96 bytes以上の受理済み response を
@@ -89,19 +119,19 @@ minimum free heap 74,976 bytesだった。drain 後は free heap 87,372 bytesま
 - ACK response が3回失われても、再送、duplicate suppression、queue drain、4 KiB round trip は成立した
 - 16 KiB write は queue check より前に OOM になるため、default byte limit を8 KiBへ下げる
 - 8 KiB limit の atomic queue-full と controller fail-fast は成立した
-- queue-full 後の自動的な distribution recovery は未達で、AtomVM 側の connection cleanup 調査に残す
+- queue-full時のsession rollover後、application retryでdistribution handshakeとping/pongへ復旧した
 
 heap 値には console logging と周辺 process の allocation も含まれるため、厳密な queue 単体の使用量ではなく、この
 firmware / run の観測値である。
 
 ## 最終 default regression
 
-default byte limit を8 KiBへ変更し、fault / traceを無効にした通常 firmwareを両boardへ書き戻した。両boardを同時に
-resetし、Clientのdefault 3秒 startup delayでzero-byte ping/pongを3回実行した。
+default byte limitとqueue-full session rolloverを含み、fault / traceを無効にした通常 firmwareを両boardへ書き戻した。
+両boardを同時にresetし、Clientのdefault 3秒 startup delayでzero-byte ping/pongを3回実行した。
 
 ```text
-modbus_disterl: complete 3 remote ping/pong messages rtt_min_ms=1339 \
-rtt_avg_ms=2542 rtt_max_ms=4947 timeouts=0 elapsed_ms=13836
+modbus_disterl: complete 3 remote ping/pong messages rtt_min_ms=1340 \
+rtt_avg_ms=2544 rtt_max_ms=4953 timeouts=0 elapsed_ms=13844
 ```
 
-3 / 3成功、timeout 0で、8 KiB defaultへの変更後も通常のgenuine distribution trafficが成立した。
+3 / 3成功、timeout 0で、8 KiB defaultとsession rollover追加後も通常のgenuine distribution trafficが成立した。

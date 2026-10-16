@@ -155,7 +155,7 @@ defmodule DisterlProbe.ModbusUART do
         )
 
         log_queue("rejected", state, byte_size(data))
-        {:reply, error, state}
+        {:reply, error, recover_rejected_write(state, elem(error, 1))}
     end
   end
 
@@ -466,4 +466,21 @@ defmodule DisterlProbe.ModbusUART do
         "payload_bytes=#{byte_size(incoming.payload)}"
     )
   end
+
+  defp recover_rejected_write(state, :queue_full) do
+    previous_session = state.channel.session
+    channel = Channel.restart(state.channel)
+
+    IO.puts(
+      "modbus_uart: queue-full stream reset session=#{previous_session} -> #{channel.session}"
+    )
+
+    %{
+      reset_stream(state, state.reader)
+      | channel: channel,
+        trace_queue_active: false
+    }
+  end
+
+  defp recover_rejected_write(state, _reason), do: state
 end

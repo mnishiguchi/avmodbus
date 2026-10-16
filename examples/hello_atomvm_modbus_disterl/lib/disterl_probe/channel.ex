@@ -43,6 +43,17 @@ defmodule DisterlProbe.Channel do
     }
   end
 
+  @doc false
+  def restart(state), do: restart(state, Session.new_id())
+
+  @doc false
+  def restart(state, session) do
+    new(session,
+      max_queued_bytes: state.max_queued_bytes,
+      max_queued_chunks: state.max_queued_chunks
+    )
+  end
+
   def queue(state, data) when is_binary(data) and byte_size(data) > 0 do
     sequence = next_sequence(state.sent)
     data_size = byte_size(data)

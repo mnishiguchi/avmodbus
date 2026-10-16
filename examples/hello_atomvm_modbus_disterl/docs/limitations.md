@@ -10,8 +10,9 @@
   Elixir term や binary の runtime overhead を含む厳密な heap 上限ではありません。さらに `serial_dist_controller` は
   adapter 呼び出し前に frame binary を作るため、16 KiB application payload は queue check に到達する前に実機で
   OOM になりました。8 KiB application payload / 8 KiB cap は 8,304-byte write を `:queue_full` で拒否できました。
-- queue-full 後は controller が意図どおり `serial_write_error` で終了しましたが、同じ run の再接続 handshake は
-  `crc_error` で失敗しました。既知の half-open distribution connection cleanup が解決するまで、自動復旧は保証しません。
+- queue-full時はlocal sessionをrolloverし、peerの旧readerも閉じます。8 KiB probeの実機runでは最初のoversize
+  pingが1回timeoutした後、通常payloadのretryでhandshakeとping/pongを再確立しました。ただしqueue済み / in-flight
+  stream dataは破棄され、application retryに依存します。これはdurable deliveryやexactly-onceの保証ではありません。
 - 4 KiB / 44-chunk outgoing write に対し、受理済み response を3回失敗させても duplicate delivery なしで queue を
   drainし、ping/pongを完了しました。これは limited fault run であり、長時間 ACK loss の memory stability 保証ではありません。
 - 16-bit sequence の wraparound は host test 済みですが、65,535 message をまたぐ長時間の実機試験は未実施です。

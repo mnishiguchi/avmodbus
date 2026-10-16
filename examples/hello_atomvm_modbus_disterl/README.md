@@ -240,6 +240,11 @@ OOM、8 KiB cap の 8,304-byte write は正常に queue-full となったため 
 [ADR 0008](docs/adr/0008-bound-the-virtual-uart-queue.md) と
 [ADR 0010](docs/adr/0010-reduce-default-queue-byte-limit.md) を参照してください。
 
+queue-full時はlocal FC-100 sessionも更新します。継続するpollでpeerへstream boundaryを通知し、peerの旧
+`serial_dist` readerを閉じて両側controllerを終了させます。実機では最初のoversize pingがtimeoutした後、通常payloadの
+retryでdistribution handshakeとping/pongを再確立しました。この回復範囲とdata loss semanticsは
+[ADR 0011](docs/adr/0011-roll-session-on-queue-full.md) に記録しています。
+
 `MODBUS_FAULT_*`、`MODBUS_TRACE_QUEUE`、`DISTERL_QUEUE_FULL_PROBE_BYTES` は fault / memory 調査専用です。
 通常の使用例では設定しません。response fault は Server が request を Channel に受理した後で response だけを
 `server_device_failure` に置き換えるため、Client の同一 sequence 再送と Server の duplicate suppression を実機で
