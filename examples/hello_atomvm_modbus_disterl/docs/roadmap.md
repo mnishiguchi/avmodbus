@@ -42,16 +42,17 @@
 - [ ] AtomVM側でhalf-open connection cleanupとconnection retryを修正し、startup delayなしで再検証する
 - [x] ACK-loss 下の queue / free heap と 8 KiB queue-full を実機測定する
 - [x] queue-full時にsessionをrolloverし、peer controller終了後のhandshakeとping/pong復旧を実機確認する
+- [x] queue-full後のsession rollover、peer boundary伝播、新streamの双方向配送を一連のhost testで固定する
 - [x] 2-node proof of concept では virtual UART adapter を維持し、専用 `modbus_dist` carrier は実装しないと判断する
   （[ADR 0003](adr/0003-adapt-serial-dist-with-a-virtual-uart.md)）
 
-## 調査後に判断すること
+## 判断したこと
 
-- [ ] 再利用できる部分を AVModbus の一般 API に移す価値があるか判断する
-- [ ] example のまま保守するか、独立した experimental project として分離するか判断する
+- [x] proprietary FC-100 carrier は AVModbus の一般 API に移さない
+- [x] 現時点では独立 package に分離せず、example のまま保守する
 
-これらは検証結果に基づいて判断し、長期的な方針を変更する場合は新しい
-[ADR](adr/README.md) に記録します。
+これらの package boundary は [ADR 0012](adr/0012-keep-the-carrier-in-the-example.md) に記録しています。
+example 外の具体的な利用者と安定した lifecycle contract が得られた場合に再検討します。
 
 ## 今回は対象としないこと
 

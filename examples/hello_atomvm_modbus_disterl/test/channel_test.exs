@@ -18,6 +18,47 @@ defmodule DisterlProbe.ChannelTest do
     assert Channel.done?(restarted)
   end
 
+  test "a rolled-over session discards both stale streams before bidirectional recovery" do
+    client = Channel.new(100)
+    server = Channel.new(200)
+
+    {:ok, initial_poll} = packet(client)
+    {:ok, server, nil} = Channel.receive_packet(server, initial_poll)
+    {:ok, initial_response} = packet(server)
+    {:ok, client, nil} = Channel.receive_packet(client, initial_response)
+
+    {:ok, client} = Channel.queue(client, "stale client stream")
+    {:ok, server} = Channel.queue(server, "stale server stream")
+
+    client = Channel.restart(client, 101)
+    {:ok, rollover_poll} = packet(client)
+    {:ok, server, nil} = Channel.receive_packet(server, rollover_poll)
+
+    assert server.peer_session == 101
+    assert Channel.done?(server)
+    assert server.queued_bytes == 0
+
+    {:ok, rollover_response} = packet(server)
+    {:ok, client, nil} = Channel.receive_packet(client, rollover_response)
+
+    assert client.peer_session == 200
+    assert Channel.done?(client)
+
+    {:ok, client} = Channel.queue(client, "new client stream")
+    {:ok, server} = Channel.queue(server, "new server stream")
+
+    {:ok, request} = packet(client)
+    {:ok, server, "new client stream"} = Channel.receive_packet(server, request)
+    {:ok, response} = packet(server)
+    {:ok, client, "new server stream"} = Channel.receive_packet(client, response)
+
+    {:ok, final_ack} = packet(client)
+    {:ok, server, nil} = Channel.receive_packet(server, final_ack)
+
+    assert Channel.done?(client)
+    assert Channel.done?(server)
+  end
+
   test "exchanges independently queued messages and acknowledges both" do
     {:ok, a} = Channel.queue(Channel.new(), <<0, 1, 2>>)
     {:ok, b} = Channel.queue(Channel.new(), <<3, 4, 5>>)
