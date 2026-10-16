@@ -45,6 +45,8 @@ Node B sends queued data only in a response to a poll.
 
 `serial_dist` 自身の framing、CRC32、distribution handshake、distribution controller を再利用するため、
 remote ping/pong は application 独自の protocol ではなく genuine Erlang distribution 上を通ります。
+`DISTERL_PAYLOAD_BYTES` を設定すると deterministic binary を ping に含め、Server が内容を検証して echo し、
+Client が同じ binary を再検証します。
 
 ```text
 net_kernel / dist_util / distribution controller

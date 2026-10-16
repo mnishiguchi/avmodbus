@@ -135,10 +135,10 @@ MIX_ENV=prod mix atomvm.esp32.monitor --port /dev/ttyACM1
 成功時の Client log:
 
 ```text
-modbus_disterl: sending ping 1 to :b@modbus.local
-modbus_disterl: received pong 1 from :b@modbus.local rtt_ms=...
-modbus_disterl: received pong 2 from :b@modbus.local rtt_ms=...
-modbus_disterl: received pong 3 from :b@modbus.local rtt_ms=...
+modbus_disterl: sending ping 1 to :b@modbus.local payload_bytes=0
+modbus_disterl: received pong 1 from :b@modbus.local rtt_ms=... payload_bytes=0
+modbus_disterl: received pong 2 from :b@modbus.local rtt_ms=... payload_bytes=0
+modbus_disterl: received pong 3 from :b@modbus.local rtt_ms=... payload_bytes=0
 modbus_disterl: complete 3 remote ping/pong messages
 ```
 
@@ -166,9 +166,15 @@ message は registered process `:modbus_disterl_demo` 宛に Erlang distribution
 | `DISTERL_PING_COUNT` | `3` | remote ping 回数 |
 | `DISTERL_PING_DELAY_MS` | `2000` | boot 後の最初の ping delay |
 | `DISTERL_PONG_TIMEOUT_MS` | `15000` | pong timeout |
+| `DISTERL_PAYLOAD_BYTES` | `0` | ping/pong で検証する deterministic payload size |
 
 これらは `Application.compile_env/3` で application に埋め込まれます。値を変更する
 ときは `mix clean` して、同じ environment で pack / flash してください。
+
+232-byte の Modbus chunk 上限を超える genuine distribution message を検証する場合は、両 node を同じ
+`DISTERL_PAYLOAD_BYTES` で build します。低 baud rate では `DISTERL_PONG_TIMEOUT_MS` も十分に延ばしてください。
+現在確認されている multi-chunk 実機試験の制約は
+[large distribution payload の作業記録](docs/worklog/2026-10-16-large-distribution-payload.md) を参照してください。
 
 ## References
 

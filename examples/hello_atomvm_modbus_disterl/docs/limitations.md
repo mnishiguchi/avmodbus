@@ -13,7 +13,10 @@
   poll interval、baud、bus error に対する余裕は小さいです。
 - `serial_dist` の最大 frame は Modbus chunk より大きいため adapter が 232-byte chunk に分割しますが、
   検証済みなのは 64 KiB byte stream の host stress test までです。大きな genuine distribution payload の
-  実機試験は未実施です。
+  実機 round trip は未達です。512-byte payload は Server で受信・検証できましたが、echo response の
+  full-size chunk が Client の 500 ms Modbus deadline を超え、最終的に `net_tick_timeout` になりました。
+- 4 KiB payload の 9,600-baud 実機試験も `net_tick_timeout` になりました。115,200 baud では今回の
+  HW-519 構成で distribution handshake が安定せず、baud rate の変更だけでは解決しませんでした。
 - 実測した steady-state ping/pong RTT は約 0.8 秒で、direct UART より大幅に遅くなります。
 - PackBEAM checker は Elixir `GenServer` が生成する error-reporting path に含まれる
   `erlang:phash2/2` を警告します。検証した normal path は両方の実機で動作しました。

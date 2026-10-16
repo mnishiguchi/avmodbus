@@ -9,6 +9,11 @@ end
 
 mode = if System.get_env("MODBUS_EXPERIMENT") == "disterl", do: :disterl, else: :transport
 role = if System.get_env("MODBUS_ROLE") == "server", do: :server, else: :client
+ping_payload_bytes = parse_integer.("DISTERL_PAYLOAD_BYTES", 0)
+
+if ping_payload_bytes < 0 do
+  raise ArgumentError, "DISTERL_PAYLOAD_BYTES must be a non-negative integer"
+end
 
 serial = [
   peripheral: System.get_env("ATOMVM_UART_PERIPHERAL") || "UART1",
@@ -48,4 +53,5 @@ config :disterl_probe,
   cookie: System.get_env("ATOMVM_COOKIE") || "AtomVM",
   ping_count: parse_integer.("DISTERL_PING_COUNT", 3),
   ping_delay_ms: parse_integer.("DISTERL_PING_DELAY_MS", 2_000),
-  pong_timeout_ms: parse_integer.("DISTERL_PONG_TIMEOUT_MS", 15_000)
+  pong_timeout_ms: parse_integer.("DISTERL_PONG_TIMEOUT_MS", 15_000),
+  ping_payload_bytes: ping_payload_bytes
