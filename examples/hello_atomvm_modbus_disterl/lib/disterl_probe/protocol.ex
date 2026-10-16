@@ -12,8 +12,10 @@ defmodule DisterlProbe.Protocol do
   # Keep the complete custom payload at the same 245-byte ceiling used by
   # version 1: thirteen header bytes plus at most 232 data bytes.
   @max_payload 232
+  @header_size 13
 
   def max_payload, do: @max_payload
+  def header_size, do: @header_size
 
   def encode(session, sequence, acknowledged_session, acknowledgment, payload)
       when is_integer(session) and session in 1..4_294_967_295 and

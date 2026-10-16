@@ -228,6 +228,11 @@ defmodule DisterlProbe.ChannelTest do
     assert Channel.receive_packet(receiver, out_of_order) == {:error, :out_of_order}
   end
 
+  test "reports the encoded empty-packet header size used by transaction tracing" do
+    assert {:ok, packet} = Protocol.encode(1, 0, 0, 0, <<>>)
+    assert byte_size(packet) == Protocol.header_size()
+  end
+
   defp receive_and_ack_all_but_last(sender, receiver, 0),
     do: %{sender: sender, receiver: receiver}
 

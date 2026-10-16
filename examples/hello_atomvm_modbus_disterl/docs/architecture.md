@@ -48,6 +48,11 @@ remote ping/pong は application 独自の protocol ではなく genuine Erlang 
 `DISTERL_PAYLOAD_BYTES` を設定すると deterministic binary を ping に含め、Server が内容を検証して echo し、
 Client が同じ binary を再検証します。
 
+`MODBUS_TRACE_TRANSACTIONS=1` では Client の non-idle physical transaction と全 failure について request /
+response byte 数、経過時間、poll 番号、最大 latency、累積 success / failure 数を出力します。13-byte の
+empty poll 成功は timing への影響を抑えるため出力せず、counter にだけ含めます。通常実行では最初の
+3 failure だけを表示します。
+
 ```text
 net_kernel / dist_util / distribution controller
                        |

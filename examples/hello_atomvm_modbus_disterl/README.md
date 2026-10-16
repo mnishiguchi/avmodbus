@@ -159,6 +159,7 @@ message は registered process `:modbus_disterl_demo` 宛に Erlang distribution
 | `MODBUS_UNIT_ID` | `1` | Server unit ID |
 | `MODBUS_RESPONSE_TIMEOUT_MS` | `1000` / `500` | Phase 1 / Phase 2 transaction timeout |
 | `MODBUS_POLL_INTERVAL_MS` | `1000` / `20` | Phase 1 / Phase 2 polling interval |
+| `MODBUS_TRACE_TRANSACTIONS` | unset | `1` / `true` で non-idle transaction と全 failure の size、latency、累積成否を記録 |
 | `MODBUS_START_DELAY_MS` | `0` | recovery test 用の起動 delay |
 | `ATOMVM_NODE_ALIAS` | role から `a` / `b` | local node alias |
 | `ATOMVM_PEER_ALIAS` | role から `b` / `a` | peer node alias |

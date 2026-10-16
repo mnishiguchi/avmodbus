@@ -25,6 +25,7 @@
 - [x] 64 KiB byte stream の chunk 分割、再構成、再送を host stress test する
 - [x] configurable deterministic payload を genuine distribution ping/pong に追加する
 - [x] 512-byte genuine distribution payload の Client-to-Server 配送と内容検証を実機で確認する
+- [x] Modbus transaction size、latency、累積 success / failure の opt-in tracing を追加する
 - [ ] full-size response timeout を解決し、multi-chunk payload の bidirectional round trip を実機で確認する
 - [ ] response 消失、CRC error、連続 timeout を実機または fault injection で検証する
 - [ ] baud rate と poll interval ごとの handshake 時間、RTT、timeout の安全域を測定する

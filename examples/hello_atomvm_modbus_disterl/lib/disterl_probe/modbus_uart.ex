@@ -10,7 +10,7 @@ defmodule DisterlProbe.ModbusUART do
   use GenServer
 
   alias AVModbus.{Client, Server}
-  alias DisterlProbe.{Channel, Protocol}
+  alias DisterlProbe.{Channel, Protocol, TransactionStats}
 
   @function_code 100
   @max_payload Protocol.max_payload()
@@ -74,8 +74,7 @@ defmodule DisterlProbe.ModbusUART do
       timeout_ms: Keyword.fetch!(options, :timeout_ms),
       poll_ms: Keyword.fetch!(options, :poll_ms),
       request_ref: nil,
-      polls: 0,
-      failures: 0
+      stats: TransactionStats.new(Keyword.get(options, :trace_transactions, false))
     }
 
     case open_transport(role, Keyword.fetch!(options, :serial), state) do
@@ -124,41 +123,36 @@ defmodule DisterlProbe.ModbusUART do
 
   @impl true
   def handle_info(:poll, %{role: :client, request_ref: nil} = state) do
-    with {:ok, request} <- Channel.packet(state.channel),
-         reference when is_reference(reference) <-
-           Client.send_request(
-             state.resource,
-             state.unit_id,
-             {:custom, @function_code, request},
-             timeout: state.timeout_ms,
-             to: self()
-           ) do
-      {:noreply, %{state | request_ref: reference, polls: state.polls + 1}}
-    else
+    case Channel.packet(state.channel) do
+      {:ok, request} ->
+        send_poll(state, request)
+
       {:error, reason} ->
-        log_poll_failure(state, reason)
+        log_adapter_failure(reason)
         schedule_poll(state.poll_ms)
-        {:noreply, %{state | failures: state.failures + 1}}
+        {:noreply, state}
     end
   end
 
   def handle_info({Client, reference, {:ok, response}}, %{request_ref: reference} = state) do
+    state = complete_success(state, response)
+
     case receive_exchange(state, response) do
       {:ok, next, _unused_request} ->
         schedule_poll(next.poll_ms)
         {:noreply, %{next | request_ref: nil}}
 
       {:error, reason} ->
-        log_poll_failure(state, reason)
+        log_adapter_failure(reason)
         schedule_poll(state.poll_ms)
-        {:noreply, %{state | request_ref: nil, failures: state.failures + 1}}
+        {:noreply, %{state | request_ref: nil}}
     end
   end
 
   def handle_info({Client, reference, {:error, reason}}, %{request_ref: reference} = state) do
-    log_poll_failure(state, reason)
+    state = complete_failure(state, reason)
     schedule_poll(state.poll_ms)
-    {:noreply, %{state | request_ref: nil, failures: state.failures + 1}}
+    {:noreply, %{state | request_ref: nil}}
   end
 
   def handle_info(
@@ -190,6 +184,38 @@ defmodule DisterlProbe.ModbusUART do
 
   defp open_transport(:server, serial, state) do
     Server.RTU.start_link({__MODULE__, self()}, units: [state.unit_id], serial: serial)
+  end
+
+  defp send_poll(state, request) do
+    stats = TransactionStats.start(state.stats, byte_size(request), now_ms())
+
+    case Client.send_request(
+           state.resource,
+           state.unit_id,
+           {:custom, @function_code, request},
+           timeout: state.timeout_ms,
+           to: self()
+         ) do
+      reference when is_reference(reference) ->
+        {:noreply, %{state | request_ref: reference, stats: stats}}
+
+      {:error, reason} ->
+        state = complete_failure(%{state | stats: stats}, reason)
+        schedule_poll(state.poll_ms)
+        {:noreply, state}
+    end
+  end
+
+  defp complete_success(state, response) do
+    {stats, event} = TransactionStats.succeed(state.stats, byte_size(response), now_ms())
+    log_transaction(stats, event)
+    %{state | stats: stats}
+  end
+
+  defp complete_failure(state, reason) do
+    {stats, event} = TransactionStats.fail(state.stats, reason, now_ms())
+    log_transaction(stats, event)
+    %{state | stats: stats}
   end
 
   defp receive_exchange(state, binary) do
@@ -254,6 +280,8 @@ defmodule DisterlProbe.ModbusUART do
 
   defp schedule_poll(delay), do: Process.send_after(self(), :poll, delay)
 
+  defp now_ms, do: :erlang.monotonic_time(:millisecond)
+
   defp log_peer_restart(previous, current) do
     IO.puts("modbus_uart: peer session changed #{previous} -> #{current}; resetting stream")
   end
@@ -265,8 +293,33 @@ defmodule DisterlProbe.ModbusUART do
   defp log_stream_data(action, data),
     do: IO.puts("modbus_uart: #{action} bytes=#{byte_size(data)}")
 
-  defp log_poll_failure(%{failures: failures}, reason) when failures < 3,
-    do: IO.puts("modbus_uart: poll failed #{inspect(reason)}; retrying")
+  defp log_transaction(stats, event) do
+    if TransactionStats.enabled?(stats) and
+         TransactionStats.trace_event?(event, Protocol.header_size()) do
+      log_transaction_event(event)
+    else
+      log_initial_failure(event)
+    end
+  end
 
-  defp log_poll_failure(_state, _reason), do: :ok
+  defp log_transaction_event(%{outcome: :ok} = event) do
+    IO.puts(
+      "modbus_uart: transaction poll=#{event.poll} outcome=ok request_bytes=#{event.request_bytes} response_bytes=#{event.response_bytes} elapsed_ms=#{event.elapsed_ms} max_elapsed_ms=#{event.max_elapsed_ms} successes=#{event.successes} failures=#{event.failures}"
+    )
+  end
+
+  defp log_transaction_event(%{outcome: :error} = event) do
+    IO.puts(
+      "modbus_uart: transaction poll=#{event.poll} outcome=error request_bytes=#{event.request_bytes} elapsed_ms=#{event.elapsed_ms} max_elapsed_ms=#{event.max_elapsed_ms} reason=#{inspect(event.reason)} successes=#{event.successes} failures=#{event.failures}"
+    )
+  end
+
+  defp log_initial_failure(%{outcome: :error, failures: failures, reason: reason})
+       when failures <= 3,
+       do: IO.puts("modbus_uart: poll failed #{inspect(reason)}; retrying")
+
+  defp log_initial_failure(_event), do: :ok
+
+  defp log_adapter_failure(reason),
+    do: IO.puts("modbus_uart: invalid exchange #{inspect(reason)}; retrying")
 end

@@ -10,6 +10,7 @@ defmodule DisterlProbe.Distributed do
   @unit_id Application.compile_env(:disterl_probe, :unit_id, 1)
   @timeout_ms Application.compile_env(:disterl_probe, :timeout_ms, 500)
   @poll_ms Application.compile_env(:disterl_probe, :poll_ms, 20)
+  @trace_transactions Application.compile_env(:disterl_probe, :trace_transactions, false)
   @node_alias Application.compile_env(:disterl_probe, :node_alias, "a")
   @peer_alias Application.compile_env(:disterl_probe, :peer_alias, "b")
   @cookie Application.compile_env(:disterl_probe, :cookie, "AtomVM")
@@ -49,7 +50,8 @@ defmodule DisterlProbe.Distributed do
           serial: @serial,
           unit_id: @unit_id,
           timeout_ms: @timeout_ms,
-          poll_ms: @poll_ms
+          poll_ms: @poll_ms,
+          trace_transactions: @trace_transactions
         ],
         uart_module: DisterlProbe.ModbusUART
       }

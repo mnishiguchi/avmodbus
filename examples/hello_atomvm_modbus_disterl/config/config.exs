@@ -48,6 +48,7 @@ config :disterl_probe,
   timeout_ms:
     parse_integer.("MODBUS_RESPONSE_TIMEOUT_MS", if(mode == :disterl, do: 500, else: 1_000)),
   poll_ms: parse_integer.("MODBUS_POLL_INTERVAL_MS", if(mode == :disterl, do: 20, else: 1_000)),
+  trace_transactions: System.get_env("MODBUS_TRACE_TRANSACTIONS") in ["1", "true"],
   node_alias: System.get_env("ATOMVM_NODE_ALIAS") || if(role == :server, do: "b", else: "a"),
   peer_alias: System.get_env("ATOMVM_PEER_ALIAS") || if(role == :server, do: "a", else: "b"),
   cookie: System.get_env("ATOMVM_COOKIE") || "AtomVM",
