@@ -4,6 +4,16 @@ defmodule DisterlProbe.MailboxTest do
   alias AVModbus.{PDU, RTU, Server}
   alias DisterlProbe.{Channel, Mailbox, Protocol}
 
+  test "a 96-byte transport payload produces a 113-byte RTU frame" do
+    {:ok, transport} = Protocol.encode(1, 1, 0, 0, :binary.copy(<<0xA5>>, 96))
+    {:ok, pdu} = PDU.encode_request({:custom, 100, transport})
+    {:ok, frame} = RTU.encode(1, pdu)
+
+    assert byte_size(transport) == 109
+    assert byte_size(pdu) == 110
+    assert byte_size(frame) == 113
+  end
+
   test "custom Modbus PDU carries queued bytes in both directions" do
     {:ok, mailbox} = Mailbox.start_link()
     assert :ok = Mailbox.queue(mailbox, "server message")

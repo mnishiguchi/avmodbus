@@ -71,4 +71,6 @@ HW-519 を power-cycle して baseline を再確認してから測定を再開�
 4. 512 bytes、1 KiB、4 KiB の順で bidirectional round trip を再試験する
 
 512-byte round trip は後の試験で 96-byte operating chunk を使って完了した。調査と実測値は
-[Bidirectional multi-chunk round trip](2026-10-16-bidirectional-multichunk.md) を参照する。1 KiB と 4 KiB は未再試験である。
+[Bidirectional multi-chunk round trip](2026-10-16-bidirectional-multichunk.md) を参照する。さらに現行の
+96-byte chunk では 9,600 / 115,200 baud の両方で 4 KiB round trip も完了した。条件と制約は
+[115,200 baud での payload 検証](2026-10-16-high-baud-payloads.md) に記録している。

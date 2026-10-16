@@ -3,6 +3,62 @@ defmodule DisterlProbe.ChannelTest do
 
   alias DisterlProbe.{Channel, Protocol}
 
+  test "restart preserves queue limits and creates a clean session boundary" do
+    channel = Channel.new(100, max_queued_bytes: 192, max_queued_chunks: 2)
+    assert {:ok, channel} = Channel.queue(channel, <<1>>)
+
+    restarted = Channel.restart(channel, 200)
+
+    assert restarted.session == 200
+    assert restarted.peer_session == nil
+    assert restarted.max_queued_bytes == 192
+    assert restarted.max_queued_chunks == 2
+    assert restarted.queued_bytes == 0
+    assert restarted.outstanding == 0
+    assert Channel.done?(restarted)
+  end
+
+  test "a rolled-over session discards both stale streams before bidirectional recovery" do
+    client = Channel.new(100)
+    server = Channel.new(200)
+
+    {:ok, initial_poll} = packet(client)
+    {:ok, server, nil} = Channel.receive_packet(server, initial_poll)
+    {:ok, initial_response} = packet(server)
+    {:ok, client, nil} = Channel.receive_packet(client, initial_response)
+
+    {:ok, client} = Channel.queue(client, "stale client stream")
+    {:ok, server} = Channel.queue(server, "stale server stream")
+
+    client = Channel.restart(client, 101)
+    {:ok, rollover_poll} = packet(client)
+    {:ok, server, nil} = Channel.receive_packet(server, rollover_poll)
+
+    assert server.peer_session == 101
+    assert Channel.done?(server)
+    assert server.queued_bytes == 0
+
+    {:ok, rollover_response} = packet(server)
+    {:ok, client, nil} = Channel.receive_packet(client, rollover_response)
+
+    assert client.peer_session == 200
+    assert Channel.done?(client)
+
+    {:ok, client} = Channel.queue(client, "new client stream")
+    {:ok, server} = Channel.queue(server, "new server stream")
+
+    {:ok, request} = packet(client)
+    {:ok, server, "new client stream"} = Channel.receive_packet(server, request)
+    {:ok, response} = packet(server)
+    {:ok, client, "new server stream"} = Channel.receive_packet(client, response)
+
+    {:ok, final_ack} = packet(client)
+    {:ok, server, nil} = Channel.receive_packet(server, final_ack)
+
+    assert Channel.done?(client)
+    assert Channel.done?(server)
+  end
+
   test "exchanges independently queued messages and acknowledges both" do
     {:ok, a} = Channel.queue(Channel.new(), <<0, 1, 2>>)
     {:ok, b} = Channel.queue(Channel.new(), <<3, 4, 5>>)
@@ -113,7 +169,8 @@ defmodule DisterlProbe.ChannelTest do
              Channel.receive_packet(receiver, restarted_packet)
 
     assert receiver.outgoing == nil
-    assert receiver.pending == []
+    assert Channel.pending_payloads(receiver) == []
+    assert receiver.queued_bytes == 0
     assert receiver.sent == 0
   end
 
@@ -136,7 +193,8 @@ defmodule DisterlProbe.ChannelTest do
     assert recovered.peer_session == 11
     assert recovered.received == 4
     assert recovered.outgoing == nil
-    assert recovered.pending == []
+    assert Channel.pending_payloads(recovered) == []
+    assert recovered.queued_bytes == 0
     assert recovered.sent == 0
   end
 
@@ -249,7 +307,39 @@ defmodule DisterlProbe.ChannelTest do
 
   test "does not reuse a sequence while the complete sequence space is outstanding" do
     full = %{Channel.new() | outstanding: 65_535}
-    assert Channel.queue(full, "one too many") == {:error, :queue_unavailable}
+    assert Channel.queue(full, "one too many") == {:error, :queue_full}
+  end
+
+  test "bounds queued chunks and releases capacity after acknowledgment" do
+    sender = Channel.new(100, max_queued_bytes: 100, max_queued_chunks: 2)
+    {:ok, sender} = Channel.queue(sender, "one")
+    {:ok, sender} = Channel.queue(sender, "two")
+
+    assert Channel.queue(sender, "three") == {:error, :queue_full}
+    assert sender.outstanding == 2
+    assert sender.queued_bytes == 6
+
+    receiver = Channel.new(200)
+    {:ok, request} = packet(sender)
+    {:ok, receiver, "one"} = Channel.receive_packet(receiver, request)
+    {:ok, acknowledgment} = packet(receiver)
+    {:ok, sender, nil} = Channel.receive_packet(sender, acknowledgment)
+
+    assert sender.outstanding == 1
+    assert sender.queued_bytes == 3
+    assert {:ok, sender} = Channel.queue(sender, "three")
+    assert Channel.pending_payloads(sender) == ["three"]
+  end
+
+  test "bounds queued payload bytes and preserves the original state when a write is rejected" do
+    sender = Channel.new(100, max_queued_bytes: 5, max_queued_chunks: 10)
+    {:ok, sender} = Channel.queue(sender, "abc")
+    {:ok, sender} = Channel.queue(sender, "de")
+
+    assert Channel.queue(sender, "f") == {:error, :queue_full}
+    assert sender.outgoing == {1, "abc"}
+    assert Channel.pending_payloads(sender) == ["de"]
+    assert sender.queued_bytes == 5
   end
 
   test "rejects malformed data and out-of-order sequences" do

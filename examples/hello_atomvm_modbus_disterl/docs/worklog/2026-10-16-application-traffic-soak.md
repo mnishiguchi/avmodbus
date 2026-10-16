@@ -61,3 +61,6 @@ modbus_uart: peer session changed 2384873094 -> 973046600; resetting stream
 
 この race は同日の follow-up で修正した。原因と再検証結果は
 [simultaneous-startup recovery](2026-10-16-simultaneous-startup-recovery.md) を参照する。
+
+115,200 baud でも後日同じ 512-byte payload を 30 往復し、timeout なしで完了した。比較条件と測定値は
+[115,200 baud での payload 検証](2026-10-16-high-baud-payloads.md) に記録している。

@@ -12,7 +12,7 @@
 
 - [アーキテクチャ](architecture.md) — FC-100 transport と `serial_dist` adapter の構成
 - [既知の制約](limitations.md) — 現在確認している制約と対象外
-- [ロードマップ](roadmap.md) — 完了した検証と今後の調査候補
+- [ロードマップ](roadmap.md) — 現在地、今回の完了範囲、マージ後の調査候補
 - [設計判断記録](adr/README.md) — 実験の境界と transport 設計の判断
 
 ## 検証記録

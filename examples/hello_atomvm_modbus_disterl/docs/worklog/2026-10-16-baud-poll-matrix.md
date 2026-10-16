@@ -50,5 +50,8 @@ baud rate を 19,200、38,400、115,200 と上げるにつれて established RTT
 推定する。
 
 以前の 115,200-baud failure は session synchronization 修正前の結果であり、zero-byte handshake については再現しなかった。
-ただし 512-byte multi-chunk traffic と長時間の tick coexistence は 115,200 baud で未検証なので、default は実績範囲が
-最も広い 9,600 baud / 20 ms のままとする。
+その後、115,200 baud で 512-byte multi-chunk traffic の 30-message soak を完了し、4 KiB round trip は
+9,600 / 115,200 baud の両方で完了した。9,600 baud では 4 KiB payload の 3-message consecutive traffic も
+timeout なしで完了した。結果は
+[115,200 baud での payload 検証](2026-10-16-high-baud-payloads.md) に記録している。連続試験も 1 run に限られるため、
+実績範囲が最も広い 9,600 baud / 20 ms を引き続き default とする。

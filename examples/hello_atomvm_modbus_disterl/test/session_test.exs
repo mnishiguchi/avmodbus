@@ -12,4 +12,10 @@ defmodule DisterlProbe.SessionTest do
     assert Session.new_id(0) == 1
     assert Session.new_id(4_294_967_296) == 1
   end
+
+  test "a replacement never repeats the immediately previous session" do
+    assert Session.new_id_except(42, 42) == 43
+    assert Session.new_id_except(4_294_967_295, -1) == 1
+    assert Session.new_id_except(42, 100) == 100
+  end
 end
