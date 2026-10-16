@@ -51,7 +51,7 @@ mix test
 ```
 
 host test は packet validation、FIFO ordering、ACK、lost-response retry、duplicate
-suppression、custom PDU の end-to-end encode/decode を確認します。
+suppression、CRC error と連続 timeout 後の復旧、custom PDU / RTU frame の end-to-end encode/decode を確認します。
 
 ## Phase 1: logical transport probe
 

@@ -6,6 +6,7 @@
 
 ## 記録
 
+- [2026-10-16: RTU fault injection](2026-10-16-rtu-fault-injection.md)
 - [2026-10-16: PackBEAM `phash2/2` warning の除去](2026-10-16-packbeam-phash2.md)
 - [2026-10-16: Modbus transaction tracing](2026-10-16-transaction-tracing.md)
 - [2026-10-16: large genuine distribution payload](2026-10-16-large-distribution-payload.md)
