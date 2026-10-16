@@ -43,6 +43,12 @@ reboot しても、Client が session 変更を検出し、1回の pong timeout 
 調査、棄却した retry wrapper、2 run の実機結果は
 [initial-handshake liveness investigation](docs/worklog/2026-10-16-initial-handshake-liveness.md) に記録しています。
 
+AtomVM `release-0.7`へのfollow-upでは、`net_kernel`がoutgoing setup PIDを最初のpending entryへ保存する最小修正を実装しました。
+readiness後の32-byte handshake responseを40回exceptionへ置換して最初のsetupをtimeoutさせても、修正版boot libraryは
+application retryからping/pong 3 / 3へ復旧しました。同一条件の旧boot libraryは新しいhandshakeを開始しませんでした。
+この修正はAtomVM local branch `fix/net-kernel-setup-pid`のcommit `735841ba`であり、公式releaseには未収録です。手順とlogは
+[AtomVM setup retry verification](docs/worklog/2026-10-16-atomvm-setup-retry.md) にあります。
+
 アーキテクチャ、制限、設計判断の一覧は [docs/README.md](docs/README.md)、詳細な実機ログと観察結果は
 [2026-10-15-hardware-verification.md](docs/worklog/2026-10-15-hardware-verification.md) にあります。
 

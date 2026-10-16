@@ -8,7 +8,7 @@
 | 接続するもの | 通信方式 | 機器・バージョン | 確認できたこと |
 | --- | --- | --- | --- |
 | AVModbus ↔ AVModbus | RTU / RS485 | XIAO ESP32-C5 × 2、HW-519 × 2、AtomVM `v0.7.0-beta.0+git.8d3e051` | 2026-10-10 に 5 分間・1,623 件成功、失敗 0。後日、読み書きの試験も実施 |
-| AtomVM `serial_dist` ↔ `serial_dist` | AVModbus custom FC-100 carrier / RTU / RS485 | XIAO ESP32-C5 × 2、HW-519 × 2、AtomVM `v0.7.0-beta.0+git.8d3e051` | 2026-10-15〜16 に genuine distribution handshake、remote process ping / pong、512-byte payload の 30 往復、96-byte chunk と 9,600 baud での 4 KiB payload の3回連続往復、115,200 baud での 4 KiB payload の 1 往復、確立済み 4 KiB 転送中の Server reboot recovery、3秒のClient startup delayによるClient先行起動mitigation 2 runを確認 |
+| AtomVM `serial_dist` ↔ `serial_dist` | AVModbus custom FC-100 carrier / RTU / RS485 | XIAO ESP32-C5 × 2、HW-519 × 2、AtomVM `v0.7.0-beta.0+git.8d3e051` | 2026-10-15〜16 に genuine distribution handshake、remote process ping / pong、512-byte payload の 30 往復、96-byte chunk と 9,600 baud での 4 KiB payload の3回連続往復、115,200 baud での 4 KiB payload の 1 往復、確立済み 4 KiB 転送中の Server reboot recovery、FC-100 peer readiness gateを確認。さらにAtomVM local patch `735841ba`ではreadiness後の40-response handshake faultからapplication retryで復旧し、旧boot libraryとの実機A/Bを確認 |
 | AVModbus ↔ `pymodbus` | TCP / RTU / ASCII | ホスト上の TCP・仮想シリアル、`pymodbus` 3.15.0 | Client / Server の両方向でテスト |
 | AVModbus ↔ `libmodbus` | TCP / RTU | ホスト上の TCP・仮想シリアル、`libmodbus` 3.1.11 | Client / Server の両方向でテスト |
 

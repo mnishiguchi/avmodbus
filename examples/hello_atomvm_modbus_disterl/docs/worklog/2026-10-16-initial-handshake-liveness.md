@@ -87,3 +87,8 @@ link managerを含むretry lifecycleを検証する必要がある。exampleは�
 4は同日に実施し、約70秒Client先行でもping/pongへ進むことを確認した。結果とdefault変更は
 [peer readiness gate実機検証](2026-10-16-peer-readiness-gate.md)と
 [ADR 0013](../adr/0013-gate-net-kernel-on-peer-readiness.md)に記録している。
+
+1〜3のfollow-upも同日に実施した。`ProtoDist:setup/5`の返すPIDを最初のpending entryへ保存する修正と、early setup
+EXIT後に次のconnectが新しいsetupを開始するAtomVM testを追加した。修正版boot libraryではreadiness後の40-response faultから
+ping/pongへ復旧し、旧boot libraryでは同一条件でapplication retryだけが続いた。詳細は
+[AtomVM setup PID cleanupとhandshake retry実機A/B](2026-10-16-atomvm-setup-retry.md)に記録している。

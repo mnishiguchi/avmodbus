@@ -41,9 +41,9 @@
 - [x] Phase 2 Clientのdefault startupを3秒遅らせ、約1.5秒Client先行の2 runで起動順序mitigationを実機確認する
 - [x] ClientのFC-100 peer readiness gateを追加し、startup delayなし・約70秒Client先行でping/pong復旧を実機確認する
 - [x] Client不在中の反復sync markerをcoalesceし、Serverを約210秒先行させてもqueue-fullにならず接続できることを実機確認する
-- [ ] readiness確認後のfailureに対するAtomVM側half-open connection cleanupとconnection retryを修正する
-  （setup PIDをpending entryへ保存する最小修正候補と検証手順は
-  [initial-handshake livenessの作業記録](worklog/2026-10-16-initial-handshake-liveness.md#upstream-follow-up)に記録済み）
+- [x] AtomVM `net_kernel`がsetup PIDをpending entryへ保存する修正と回帰testを追加し、readiness後の
+  40-response faultからapplication retryでhandshakeとping/pongへ復旧することを新旧boot libraryの実機A/Bで確認する
+  （[AtomVM setup retryの検証記録](worklog/2026-10-16-atomvm-setup-retry.md)）
 - [x] ACK-loss 下の queue / free heap と 8 KiB queue-full を実機測定する
 - [x] queue-full時にsessionをrolloverし、peer controller終了後のhandshakeとping/pong復旧を実機確認する
 - [x] queue-full後のsession rollover、peer boundary伝播、新streamの双方向配送を一連のhost testで固定する

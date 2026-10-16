@@ -28,7 +28,10 @@
   peer session change後にapplication ping retryだけでは新しいhandshakeが始まりませんでした。defaultのPhase 2 Clientは
   FC-100 peer responseを確認するまで`net_kernel`を開始しません。Clientを約70秒先行させた実機runでping/pong 3 / 3、
   timeout 0を確認しました。ただしこれはinitial setupを開始する前のreadiness gateです。readiness確認後に発生する任意の
-  half-open connection cleanupとconnection retry trigger自体は、AtomVM側で未解決です。
+  failureを一般に回復するものではありません。AtomVM `release-0.7`向けのsetup PID保存patchでは、readiness後に
+  32-byte handshake responseを40回exceptionへ置換して最初のsetupをtimeoutさせても、application retryから
+  ping/pong 3 / 3へ復旧しました。旧boot libraryでは同じ条件でretryが停止しました。このpatchはlocal branchで検証済みですが、
+  公式AtomVM `v0.7.0-beta.0`には未収録であり、任意のpeer half-open stateを保証しません。
 - AtomVM `net_kernel` の distribution setup timeout は 7 秒固定です。9,600 baud の検証構成では成功しましたが、
   1,000 ms poll interval では setup timeout になりました。500 ms は 1 回成功したものの安全域とはみなさず、20 ms を
   default とします。
