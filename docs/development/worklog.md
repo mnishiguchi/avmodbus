@@ -83,7 +83,7 @@ distribution handshake と remote process messaging に加え、512-byte payload
 223.327 秒、error と pong timeout なしで完了しました。片側または両側の再起動後の再同期も
 確認しています。115,200 baud の follow-up では 512-byte payload の 30 往復を 99.877 秒で完了し、
 4 KiB payload の 1 往復も 22.617 秒で完了しました。同じ 4 KiB payload は 9,600 baud でも
-36.051 秒で完了しました。
+3回の往復を連続実行し、RTT min / average / max 33.817 / 34.743 / 36.594 秒、timeout 0 で完了しました。
 
 **判断:** AVModbus の custom function support は application-specific carrier の実装に利用できます。
 ただし、今回の polling protocol、stream adaptation、recovery logic は Modbus library の一般機能では

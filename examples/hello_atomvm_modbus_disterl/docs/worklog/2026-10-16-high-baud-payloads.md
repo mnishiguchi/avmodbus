@@ -1,4 +1,4 @@
-# 115,200 baud での 512-byte soak と 4 KiB baud comparison — 2026-10-16
+# 115,200 baud での 512-byte soak と 4 KiB traffic — 2026-10-16
 
 ## 目的
 
@@ -12,6 +12,7 @@ baud / poll matrix では 115,200 baud の zero-byte ping/pong まで確認し�
 2. 4 KiB payload の 1-message bidirectional round trip
 3. 4 KiB round trip 完了後の idle connection
 4. 同じ 4 KiB payload の 9,600-baud comparison
+5. default の 9,600 baud で 4 KiB payload の 3-message consecutive traffic
 
 ## 構成
 
@@ -104,14 +105,49 @@ modbus_disterl: complete 1 remote ping/pong messages rtt_min_ms=36051 rtt_avg_ms
 - Client 起動から完了まで: 36,233 ms
 - 完了後 30 秒の idle 観察中に `net_tick_timeout`、connection shutdown、追加 error は発生しなかった
 
+## 4 KiB consecutive traffic — 9,600 baud
+
+単発試験の後、default の 9,600 baud / 20 ms poll / 96-byte chunk で 4 KiB payload を 3 回連続送信した。
+ping 間 delay は設けず、各 pong の受信直後に次の ping を送った。
+
+追加設定:
+
+```text
+DISTERL_PAYLOAD_BYTES=4096
+DISTERL_PING_COUNT=3
+DISTERL_PING_DELAY_MS=0
+DISTERL_PONG_TIMEOUT_MS=120000
+```
+
+各往復で Client の 4,208-byte stream は `96 × 43 + 80` bytes、Server の 4,202-byte echo は
+`96 × 43 + 74` bytes に分割された。Server と Client は3個すべての payload の size と内容を検証した。
+
+```text
+modbus_disterl: received pong 1 from :b@modbus.local rtt_ms=36594 payload_bytes=4096
+modbus_disterl: first remote reply connection_ms=36776
+modbus_disterl: received pong 2 from :b@modbus.local rtt_ms=33820 payload_bytes=4096
+modbus_disterl: received pong 3 from :b@modbus.local rtt_ms=33817 payload_bytes=4096
+modbus_disterl: complete 3 remote ping/pong messages rtt_min_ms=33817 rtt_avg_ms=34743 rtt_max_ms=36594 timeouts=0 elapsed_ms=104440
+```
+
+- application payload round trip: 3 / 3 成功
+- payload validation error: 0
+- pong timeout / retry: 0
+- RTT min / average / max: 33,817 / 34,743 / 36,594 ms
+- first remote reply: 36,776 ms
+- Client 起動から完了まで: 104,440 ms
+- 完了後 35 秒の idle 観察中に `net_tick_timeout`、connection shutdown、追加 error は発生しなかった
+
 ## 判断
 
 115,200 baud / 20 ms poll / 96-byte chunk では、512-byte traffic を 30 往復しながら connection を維持できた。
-また、4 KiB の genuine distribution message は 9,600 baud と 115,200 baud の両方で双方向へ 1 往復でき、
+また、4 KiB の genuine distribution message は 9,600 baud と 115,200 baud の両方で双方向へ往復できた。
+9,600 baud では3回の連続 traffic も timeout なしで完了し、完了後の idle 中も connection を維持した。
 旧 232-byte chunk 構成で発生した `net_tick_timeout` は再現しなかった。この比較は operating chunk の縮小が
-安定化に寄与したことを示すが、single run のため failure 原因を chunk size だけに限定はできない。
+安定化に寄与したことを示すが、各条件の run 数が少ないため failure 原因を chunk size だけに限定はできない。
 
-一方、4 KiB は各 baud で single run であり、連続 traffic や reboot recovery は未検証である。default は
-実績範囲の広い 9,600 baud / 20 ms のままとし、115,200 baud を一般的な安定動作として保証しない。
+一方、4 KiB の consecutive run は 9,600 baud で1回、115,200 baud は single-message run だけであり、
+4 KiB traffic 中の reboot recovery も未検証である。default は実績範囲の広い 9,600 baud / 20 ms のままとし、
+どちらの baud rate についても 4 KiB traffic を一般的な安定動作として保証しない。
 
 試験後、両 board は 9,600 baud / 20 ms poll / zero-byte payload の default distributed Erlang firmware へ戻した。

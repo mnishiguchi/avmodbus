@@ -31,7 +31,8 @@ Modbus RTU・ASCII・TCP に対応し、データを読み取る Client と、�
 AVModbus の custom Function Code `100` を transport primitive として使い、AtomVM の
 `serial_dist` を Modbus RTU / RS485 上で動かすことに成功しています。2 台の XIAO
 ESP32-C5 で genuine distribution handshake、remote process の ping / pong、512-byte
-payload の連続往復、96-byte chunk と 9,600 / 115,200 baud での 4 KiB payload の 1 往復、
+payload の連続往復、96-byte chunk と 9,600 baud での 4 KiB payload の3回連続往復、
+115,200 baud での 4 KiB payload の 1 往復、
 再起動後の再同期を確認しました。
 
 これは [独立した実験用サンプル](examples/hello_atomvm_modbus_disterl/README.md) の成果です。

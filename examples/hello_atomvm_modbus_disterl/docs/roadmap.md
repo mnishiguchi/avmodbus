@@ -34,6 +34,7 @@
 - [x] baud rate と poll interval ごとの handshake upper bound、RTT、setup timeout 境界を実機測定する
 - [x] 115,200 baud で 512-byte payload の 30-message soak test を実行する
 - [x] 現行の 96-byte chunk と 9,600 / 115,200 baud で 4 KiB payload の bidirectional round trip を実機確認する
+- [x] default の 9,600 baud で 4 KiB payload の 3-message consecutive traffic を実機確認する
 - [x] 2-node proof of concept では virtual UART adapter を維持し、専用 `modbus_dist` carrier は実装しないと判断する
   （[ADR 0003](adr/0003-adapt-serial-dist-with-a-virtual-uart.md)）
 

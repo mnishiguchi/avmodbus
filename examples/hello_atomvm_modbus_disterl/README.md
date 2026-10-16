@@ -26,10 +26,10 @@ baud / poll matrix では 9,600–115,200 baud と 20 ms poll の zero-byte ping
 最も広い 9,600 baud / 20 ms を引き続き default とします。
 
 115,200 baud / 20 ms の follow-up では、512-byte payload を 30 往復、99.877 秒にわたって timeout なしで配送し、
-4 KiB payload の 1 往復も 22.617 秒で完了しました。同じ 4 KiB payload は default の 9,600 baud でも
-36.051 秒で完了しました。詳細は
-[payload baud comparison](docs/worklog/2026-10-16-high-baud-payloads.md) を参照してください。4 KiB は各 baud で
-single run であり、default は変更しません。
+4 KiB payload の 1 往復も 22.617 秒で完了しました。また、default の 9,600 baud では同じ 4 KiB payload を
+3回連続して往復させ、timeout なしで完了しました（RTT min / average / max: 33.817 / 34.743 / 36.594 秒）。詳細は
+[payload traffic verification](docs/worklog/2026-10-16-high-baud-payloads.md) を参照してください。4 KiB の連続試験は
+9,600 baud の 1 run に限られるため、default は変更せず、一般的な安定動作としては保証しません。
 
 アーキテクチャ、制限、設計判断の一覧は [docs/README.md](docs/README.md)、詳細な実機ログと観察結果は
 [2026-10-15-hardware-verification.md](docs/worklog/2026-10-15-hardware-verification.md) にあります。
