@@ -164,8 +164,8 @@ DISTERL_PAYLOAD_BYTES=512 DISTERL_PING_COUNT=30 \
 ```
 
 完了行には RTT の min / average / max、retry に至った pong timeout 数、起動からの経過時間が表示されます。
-両 node の同時 reset では startup sequence が収束しない場合があるため、`invalid_acknowledgment` が続く場合は
-Server を動かしたまま Client だけを reset してください。
+transport は UART / RTU receive buffer に残った以前の boot session の packet を識別して破棄します。両 node の
+ほぼ同時の reset からも自動的に再同期することを実機確認しています。
 
 ## Build-time configuration
 

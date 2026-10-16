@@ -58,3 +58,6 @@ modbus_uart: peer session changed 2384873094 -> 973046600; resetting stream
 
 その後は handshake と上記 30-message run が完了した。このため片側 reboot の recovery は再確認できたが、両側が
 近接して boot する場合の ACK / sequence synchronization には未解決の race がある。roadmap に独立した調査項目として残す。
+
+この race は同日の follow-up で修正した。原因と再検証結果は
+[simultaneous-startup recovery](2026-10-16-simultaneous-startup-recovery.md) を参照する。

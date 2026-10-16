@@ -30,8 +30,8 @@
 - [x] response 消失、CRC error、連続 timeout 後の復旧を host fault injection で検証する
 - [x] 232-byte 上限付近の不安定性を回避し、512-byte multi-chunk payload の bidirectional round trip を実機で確認する
 - [x] 30 回の 512-byte ping/pong soak test で tick frame と application traffic の共存を実機確認する
+- [x] 両 node の同時 reset で発生した stale frame の startup race を host test で再現し、実機で収束を確認する
 - [ ] baud rate と poll interval ごとの handshake 時間、RTT、timeout の安全域を測定する
-- [ ] 両 node の同時 reset で `invalid_acknowledgment` が継続する startup race を再現し、収束させる
 
 ## 調査後に判断すること
 

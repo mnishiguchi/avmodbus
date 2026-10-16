@@ -117,7 +117,30 @@ defmodule DisterlProbe.ChannelTest do
     assert receiver.sent == 0
   end
 
-  test "a rebooted receiver accepts the surviving peer's in-flight sequence" do
+  test "a new peer session ignores an acknowledgment made before session observation" do
+    {:ok, local} = Channel.queue(Channel.new(20), "old one")
+    {:ok, local} = Channel.queue(local, "old two")
+    local = %{local | peer_session: 10}
+
+    first_packet_from_restarted_peer = %{
+      session: 11,
+      sequence: 4,
+      acknowledged_session: 20,
+      acknowledgment: 2,
+      payload: "new baseline"
+    }
+
+    assert {:ok, recovered, "new baseline"} =
+             Channel.receive_packet(local, first_packet_from_restarted_peer)
+
+    assert recovered.peer_session == 11
+    assert recovered.received == 4
+    assert recovered.outgoing == nil
+    assert recovered.pending == []
+    assert recovered.sent == 0
+  end
+
+  test "a rebooted receiver discards old-session data before accepting a new stream" do
     sender =
       Enum.reduce(1..7, Channel.new(30), fn sequence, channel ->
         {:ok, channel} = Channel.queue(channel, "message #{sequence}")
@@ -130,27 +153,54 @@ defmodule DisterlProbe.ChannelTest do
     {:ok, seventh_packet} = packet(receiver.sender)
 
     assert seventh_packet.sequence == 7
+    assert seventh_packet.acknowledged_session == 40
 
-    assert {:ok, recovered, "message 7"} =
+    assert {:ok, ^restarted_receiver, nil} =
              Channel.receive_packet(restarted_receiver, seventh_packet)
 
+    {:ok, restart_notice} = packet(restarted_receiver)
+
+    assert {:ok, resynchronized_sender, nil} =
+             Channel.receive_packet(receiver.sender, restart_notice)
+
+    assert resynchronized_sender.peer_session == 41
+    assert resynchronized_sender.outgoing == nil
+    assert resynchronized_sender.sent == 0
+
+    {:ok, resynchronized_sender} = Channel.queue(resynchronized_sender, "new handshake")
+    {:ok, new_stream_packet} = packet(resynchronized_sender)
+
+    assert {:ok, recovered, "new handshake"} =
+             Channel.receive_packet(restarted_receiver, new_stream_packet)
+
     assert recovered.peer_session == 30
-    assert recovered.received == 7
+    assert recovered.received == 1
   end
 
-  test "an acknowledgment for an old local session is ignored" do
+  test "a packet for an old local session is ignored before peer observation" do
     {:ok, restarted} = Channel.queue(Channel.new(51), "new session data")
 
-    stale_ack = %{
+    stale_packet = %{
       session: 60,
-      sequence: 0,
+      sequence: 7,
       acknowledged_session: 50,
       acknowledgment: 65_535,
-      payload: <<>>
+      payload: "stale data"
     }
 
-    assert {:ok, unchanged, nil} = Channel.receive_packet(restarted, stale_ack)
-    assert unchanged.outgoing == restarted.outgoing
+    assert {:ok, ^restarted, nil} = Channel.receive_packet(restarted, stale_packet)
+    assert restarted.peer_session == nil
+
+    current_packet = %{
+      session: 61,
+      sequence: 1,
+      acknowledged_session: 0,
+      acknowledgment: 0,
+      payload: "current data"
+    }
+
+    assert {:ok, current, "current data"} = Channel.receive_packet(restarted, current_packet)
+    assert current.peer_session == 61
   end
 
   test "sequence numbers wrap from 65,535 to 1 without duplicate delivery" do
@@ -180,6 +230,7 @@ defmodule DisterlProbe.ChannelTest do
 
   test "stale acknowledgments remain valid across sequence wraparound" do
     {:ok, sender} = Channel.queue(%{Channel.new(90) | sent: 65_535}, "wrapped")
+    sender = %{sender | peer_session: 91}
 
     stale_ack = %{
       session: 91,

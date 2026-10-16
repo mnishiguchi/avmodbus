@@ -37,6 +37,8 @@ Node B sends queued data only in a response to a poll.
 - 未 ACK message が sequence 空間全体を占有した場合は、新しい message の queue を拒否する
 - 各起動時に non-zero の 32-bit session ID を生成する
 - ACK は `acknowledged_session` と一致する local session にだけ適用する
+- peer session が未確定のとき、以前の local session 宛ての packet は payload を含めて破棄する
+- 新しい peer session の最初の packet は、reset 済み sequence state に対する ACK validation を行わない
 - 新しい peer session を受信した側は、その最初の sequence を新しい receive baseline として受け入れる
 - 既知の peer が session を変更した場合は、その peer 向けに queue した古い byte-stream data を破棄する
 

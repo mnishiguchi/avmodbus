@@ -79,11 +79,26 @@ defmodule DisterlProbe.Channel do
         data
       )
 
+  # Do not bind to a peer using a frame buffered across the local reboot.
+  # Such a frame names the previous local session and belongs to its stream.
+  def receive_packet(
+        %{peer_session: nil, session: local_session} = state,
+        %{acknowledged_session: acknowledged_session}
+      )
+      when acknowledged_session != 0 and acknowledged_session != local_session,
+      do: {:ok, state, nil}
+
   def receive_packet(state, incoming) do
     session_changed = state.peer_session != incoming.session
     observed = observe_peer(state, incoming.session)
 
-    with :ok <- check_ack(observed, incoming.acknowledged_session, incoming.acknowledgment),
+    with :ok <-
+           check_ack(
+             observed,
+             incoming.acknowledged_session,
+             incoming.acknowledgment,
+             session_changed
+           ),
          {:ok, next, delivered} <-
            accept(observed, incoming.sequence, incoming.payload, session_changed) do
       {outgoing, pending, outstanding} =
@@ -125,25 +140,36 @@ defmodule DisterlProbe.Channel do
     }
   end
 
-  defp check_ack(%{session: session}, acknowledged_session, _acknowledgment)
+  # A peer can receive local data before its new session is observed here. Its
+  # first reply may therefore acknowledge a sequence that the session reset
+  # has just discarded. The new session is the synchronization boundary, so
+  # validate acknowledgments only after that boundary has been established.
+  defp check_ack(_state, _acknowledged_session, _acknowledgment, true), do: :ok
+
+  defp check_ack(%{session: session}, acknowledged_session, _acknowledgment, false)
        when acknowledged_session != session,
        do: :ok
 
-  defp check_ack(_state, _acknowledged_session, 0), do: :ok
+  defp check_ack(_state, _acknowledged_session, 0, false), do: :ok
 
-  defp check_ack(%{outgoing: {sequence, _payload}}, _acknowledged_session, acknowledgment) do
+  defp check_ack(
+         %{outgoing: {sequence, _payload}},
+         _acknowledged_session,
+         acknowledgment,
+         false
+       ) do
     if current_or_stale_ack?(acknowledgment, sequence),
       do: :ok,
       else: {:error, :invalid_acknowledgment}
   end
 
-  defp check_ack(%{outgoing: nil, sent: sent}, _acknowledged_session, acknowledgment) do
+  defp check_ack(%{outgoing: nil, sent: sent}, _acknowledged_session, acknowledgment, false) do
     if current_or_stale_ack?(acknowledgment, sent),
       do: :ok,
       else: {:error, :invalid_acknowledgment}
   end
 
-  defp check_ack(_state, _acknowledged_session, _acknowledgment),
+  defp check_ack(_state, _acknowledged_session, _acknowledgment, false),
     do: {:error, :invalid_acknowledgment}
 
   defp promote([next | rest]), do: {next, rest}

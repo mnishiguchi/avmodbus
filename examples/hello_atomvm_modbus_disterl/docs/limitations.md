@@ -9,11 +9,9 @@
 - session ID は起動時に生成する 32-bit random value であり、永続的な node identity や collision 検出はありません。
 - session 変更時の transport resynchronization と、client-only / server-only reboot 後の
   `serial_dist` 再接続は host test と実機で確認済みです。
-- 両 node の同時 reset では、Client が `invalid_acknowledgment` を繰り返して handshake が収束しない場合があります。
-  Server を動作させたまま Client だけを reset すると session-aware resynchronization で復旧します。startup race の
-  条件特定と自動収束は未完了です。
 - AtomVM `net_kernel` の distribution setup timeout は 7 秒固定です。9,600 baud の検証構成では成功しましたが、
-  poll interval、baud、bus error に対する余裕は小さいです。
+  両 node の同時 reset 後の first reply は 2 回の実測で 6.291 秒と 6.513 秒であり、poll interval、baud、bus error に
+  対する余裕は小さいです。
 - wire protocol は 232-byte payload を許容しますが、今回の XIAO / HW-519 構成では上限付近の RTU frame が
   安定しませんでした。virtual UART は 96-byte operating chunk（RTU frame 114 bytes）を default とし、
   512-byte genuine distribution payload の双方向 round trip を実機確認済みです。
