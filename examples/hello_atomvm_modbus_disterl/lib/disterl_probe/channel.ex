@@ -44,7 +44,7 @@ defmodule DisterlProbe.Channel do
   end
 
   @doc false
-  def restart(state), do: restart(state, Session.new_id())
+  def restart(state), do: restart(state, Session.new_id_except(state.session))
 
   @doc false
   def restart(state, session) do
